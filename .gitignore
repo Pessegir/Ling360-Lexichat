@@ -1,1 +1,26 @@
-#datakey.json
+# Secrets — never commit real API keys
+datakey.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Runtime artifacts (added in later phases)
+data/cache/
+logs/
+*.db

@@ -1,0 +1,4 @@
+{
+  "GEMINI_API_KEY": "paste-your-gemini-api-key-here",
+  "_comment": "Copy this file to datakey.json and fill in your key. datakey.json is gitignored. Get a free Gemini key at https://aistudio.google.com/apikey"
+}

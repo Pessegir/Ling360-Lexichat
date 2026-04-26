@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kelime Kovanı - Settings</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@400;600;700;900&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Theme Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-tertiary-fixed-variant": "#503788",
+                      "surface-container-highest": "#2d3449",
+                      "tertiary-container": "#e1d2ff",
+                      "on-tertiary-fixed": "#24005b",
+                      "inverse-primary": "#006970",
+                      "on-primary-fixed-variant": "#004f54",
+                      "secondary-fixed-dim": "#ebb2ff",
+                      "error": "#ffb4ab",
+                      "tertiary-fixed": "#eaddff",
+                      "primary": "#dbfcff",
+                      "outline-variant": "#3b494b",
+                      "on-secondary-fixed": "#320047",
+                      "on-primary-container": "#006970",
+                      "inverse-on-surface": "#283044",
+                      "surface-container-low": "#131b2e",
+                      "surface-tint": "#00dbe9",
+                      "on-surface": "#dae2fd",
+                      "surface-dim": "#0b1326",
+                      "on-error": "#690005",
+                      "surface-container": "#171f33",
+                      "on-surface-variant": "#b9cacb",
+                      "background": "#0b1326",
+                      "surface-container-high": "#222a3d",
+                      "on-primary": "#00363a",
+                      "on-secondary-container": "#fff6fc",
+                      "primary-fixed-dim": "#00dbe9",
+                      "inverse-surface": "#dae2fd",
+                      "primary-container": "#00f0ff",
+                      "on-error-container": "#ffdad6",
+                      "secondary-container": "#b600f8",
+                      "secondary": "#ebb2ff",
+                      "surface": "#0b1326",
+                      "primary-fixed": "#7df4ff",
+                      "outline": "#849495",
+                      "on-secondary": "#520072",
+                      "tertiary-fixed-dim": "#d1bcff",
+                      "on-background": "#dae2fd",
+                      "on-tertiary-container": "#6950a2",
+                      "tertiary": "#faf3ff",
+                      "surface-container-lowest": "#060e20",
+                      "on-secondary-fixed-variant": "#74009f",
+                      "on-primary-fixed": "#002022",
+                      "secondary-fixed": "#f8d8ff",
+                      "error-container": "#93000a",
+                      "surface-variant": "#2d3449",
+                      "surface-bright": "#31394d",
+                      "on-tertiary": "#391e70"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "tile-gap": "8px",
+                      "panel-padding": "24px",
+                      "container-margin": "16px",
+                      "unit": "4px"
+              },
+              "fontFamily": {
+                      "display-lg": [
+                              "Space Grotesk"
+                      ],
+                      "headline-md": [
+                              "Space Grotesk"
+                      ],
+                      "body-base": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "Space Grotesk"
+                      ]
+              },
+              "fontSize": {
+                      "display-lg": [
+                              "48px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-base": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "letterSpacing": "0em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-caps": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.0",
+                                      "letterSpacing": "0.15em",
+                                      "fontWeight": "700"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        /* Base Hex Background Simulation */
+        .hex-bg {
+            background-color: var(--tw-colors-background);
+            background-image: 
+                radial-gradient(circle at 50% 50%, var(--tw-colors-surface-container-high) 0%, transparent 2%),
+                radial-gradient(circle at 0% 100%, var(--tw-colors-surface-container-highest) 0%, transparent 2%);
+            background-size: 40px 40px;
+            background-position: 0 0, 20px 20px;
+        }
+    </style>
+</head>
+<body class="hex-bg text-on-background font-body-base text-body-base min-h-screen flex flex-col antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center px-6 py-4 w-full sticky top-0 z-50 bg-cyan-950/20 backdrop-blur-xl font-['Space_Grotesk'] tracking-wider border-b border-cyan-400/20 shadow-[0_0_15px_rgba(0,240,255,0.1)]">
+<div class="flex items-center gap-4">
+<div class="text-2xl font-black text-cyan-400 drop-shadow-[0_0_8px_rgba(0,240,255,0.8)] uppercase tracking-widest">
+                Kelime Kovanı
+            </div>
+</div>
+<div class="flex items-center gap-6">
+<!-- Trailing Primary Action -->
+<div class="text-cyan-400 font-bold border border-cyan-400/30 px-4 py-1.5 rounded-full bg-cyan-950/40 shadow-[0_0_10px_rgba(0,240,255,0.2)]">
+                2,450 XP
+            </div>
+<!-- Trailing Icon Actions -->
+<button aria-label="Account" class="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-400/10 transition-all duration-300 rounded-full p-2 flex items-center justify-center Active: scale-95 transition-transform">
+<span class="material-symbols-outlined" data-icon="account_circle" style="font-variation-settings: 'FILL' 0;">account_circle</span>
+</button>
+</div>
+</header>
+<div class="flex flex-1 relative w-full h-full">
+<!-- SideNavBar (Web) -->
+<nav class="hidden md:flex flex-col items-center py-8 z-40 fixed left-0 top-0 h-full w-20 border-r border-cyan-400/20 bg-slate-950/40 backdrop-blur-2xl shadow-[5px_0_15px_rgba(0,240,255,0.05)] pt-24 font-['Space_Grotesk'] uppercase text-xs font-bold transition-all duration-500 ease-in-out">
+<div class="flex flex-col items-center mb-8 px-2 text-center">
+<div class="w-10 h-10 rounded-full border-2 border-cyan-400 mb-2 overflow-hidden bg-surface-container-high shadow-[0_0_10px_rgba(0,240,255,0.3)]">
+<img alt="User Hologram Profile" class="w-full h-full object-cover opacity-80 mix-blend-screen" data-alt="Stylized futuristic glowing wireframe avatar headshot in neon cyan and purple" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA8jFyrMrPBu-3k_x0t8UKwOyuIq8AnuF7GiydnP7swrTogzmQpzbhRfL1-NhmuAt3zH96jyLamoVVBQx2vrcoy-1Nw_iMG_PreO_X7WHkVcqwxWpmJFO4tsS9fwGRu-OyMJA34H0d4_kUcywVp8TdtJ-MH1iwnPG2rzCwdbywhOu-cInCa8A9j-R5KX2DqGCr168DR2rbadUcexl0Ft8sniQG1Lxp62E_ft-q19CVwuUUdtRSejlu8EbeLto3Px2bgzqJ1xdZW6uw"/>
+</div>
+<div class="text-[10px] text-cyan-400 font-black leading-tight">OPERATOR</div>
+<div class="text-[8px] text-cyan-600 truncate w-full">Rank: Hex-Master</div>
+</div>
+<ul class="flex flex-col w-full gap-4">
+<!-- Tab 1: Hive (Inactive) -->
+<li class="w-full">
+<a class="flex flex-col items-center py-3 w-full border-r-2 border-transparent text-cyan-900 hover:text-cyan-200 hover:bg-cyan-500/5 transition-all duration-300" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="grid_view">grid_view</span>
+<span class="scale-90">Hive</span>
+</a>
+</li>
+<!-- Tab 2: Ranks (Inactive) -->
+<li class="w-full">
+<a class="flex flex-col items-center py-3 w-full border-r-2 border-transparent text-cyan-900 hover:text-cyan-200 hover:bg-cyan-500/5 transition-all duration-300" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="leaderboard">leaderboard</span>
+<span class="scale-90">Ranks</span>
+</a>
+</li>
+<!-- Tab 3: Gear (Active - Semantic Match for Settings) -->
+<li class="w-full">
+<a class="flex flex-col items-center py-3 w-full text-cyan-400 bg-cyan-400/10 border-r-2 border-cyan-400 hover:text-cyan-200 hover:bg-cyan-500/5 transition-all duration-300" href="#">
+<span class="material-symbols-outlined mb-1 shadow-[0_0_10px_rgba(0,240,255,0.5)] rounded-full" data-icon="settings" data-weight="fill" style="font-variation-settings: 'FILL' 1;">settings</span>
+<span class="scale-90 drop-shadow-[0_0_5px_rgba(0,240,255,0.8)]">Gear</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-0 md:ml-20 pb-24 md:pb-0 p-container-margin md:p-8 flex flex-col gap-6 w-full max-w-6xl mx-auto">
+<header class="mb-4">
+<h1 class="font-display-lg text-display-lg text-primary tracking-tight drop-shadow-[0_0_12px_rgba(0,240,255,0.4)]">SYSTEM CONFIG</h1>
+<p class="font-body-base text-body-base text-on-surface-variant opacity-80">Adjust terminal parameters and synchronization nodes.</p>
+</header>
+<!-- Bento Grid Layout for Settings -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-tile-gap">
+<!-- Section 1: Holographic Display (Spans 8 cols on desktop) -->
+<section class="col-span-1 md:col-span-8 bg-surface-container/40 backdrop-blur-2xl border border-primary-container/20 rounded-xl p-panel-padding shadow-[0_0_20px_rgba(0,240,255,0.03)] flex flex-col gap-6 relative overflow-hidden group">
+<div class="absolute -right-20 -top-20 w-64 h-64 bg-primary/5 rounded-full blur-3xl pointer-events-none group-hover:bg-primary/10 transition-all duration-700"></div>
+<div class="flex items-center gap-3 border-b border-outline-variant/30 pb-4">
+<span class="material-symbols-outlined text-primary-container" data-icon="monitor">monitor</span>
+<h2 class="font-headline-md text-headline-md text-on-surface">Holographic Display</h2>
+</div>
+<div class="flex flex-col gap-8 mt-2">
+<!-- Brightness Slider -->
+<div class="flex flex-col gap-3">
+<div class="flex justify-between items-center">
+<label class="font-label-caps text-label-caps text-on-surface-variant tracking-widest">LUMINANCE INTENSITY</label>
+<span class="font-body-base text-body-base text-primary font-mono">85%</span>
+</div>
+<div class="h-1.5 w-full bg-surface-container-highest rounded-full relative cursor-pointer">
+<!-- Track Fill -->
+<div class="absolute left-0 top-0 h-full w-[85%] bg-primary-container rounded-full shadow-[0_0_10px_var(--tw-colors-primary-container)]"></div>
+<!-- Thumb -->
+<div class="absolute left-[85%] top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-background border-2 border-primary-container rounded-full shadow-[0_0_15px_var(--tw-colors-primary-container)]"></div>
+</div>
+</div>
+<!-- Contrast Slider -->
+<div class="flex flex-col gap-3">
+<div class="flex justify-between items-center">
+<label class="font-label-caps text-label-caps text-on-surface-variant tracking-widest">MATRIX CONTRAST</label>
+<span class="font-body-base text-body-base text-primary font-mono">60%</span>
+</div>
+<div class="h-1.5 w-full bg-surface-container-highest rounded-full relative cursor-pointer">
+<!-- Track Fill -->
+<div class="absolute left-0 top-0 h-full w-[60%] bg-primary-container rounded-full opacity-60"></div>
+<!-- Thumb -->
+<div class="absolute left-[60%] top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-background border-2 border-primary-container/60 rounded-full"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 2: Audio Synthesis (Spans 4 cols on desktop) -->
+<section class="col-span-1 md:col-span-4 bg-surface-container/40 backdrop-blur-2xl border border-outline-variant/30 rounded-xl p-panel-padding shadow-[0_0_15px_rgba(0,0,0,0.2)] flex flex-col gap-6">
+<div class="flex items-center gap-3 border-b border-outline-variant/30 pb-4">
+<span class="material-symbols-outlined text-tertiary-container" data-icon="equalizer">equalizer</span>
+<h2 class="font-headline-md text-headline-md text-on-surface">Audio Synthesis</h2>
+</div>
+<div class="flex flex-col gap-5 mt-2">
+<!-- Toggle: Ambient Music -->
+<div class="flex justify-between items-center">
+<label class="font-label-caps text-label-caps text-on-surface-variant tracking-widest">AMBIENT TRACKS</label>
+<!-- Active Toggle -->
+<div class="w-12 h-6 rounded-full bg-primary-container/20 border border-primary-container relative cursor-pointer shadow-[0_0_8px_rgba(0,240,255,0.2)]">
+<div class="absolute right-1 top-1 h-4 w-4 bg-primary-container rounded-full shadow-[0_0_8px_var(--tw-colors-primary-container)]"></div>
+</div>
+</div>
+<!-- Toggle: Interface SFX -->
+<div class="flex justify-between items-center">
+<label class="font-label-caps text-label-caps text-on-surface-variant tracking-widest">TERMINAL SFX</label>
+<!-- Active Toggle -->
+<div class="w-12 h-6 rounded-full bg-primary-container/20 border border-primary-container relative cursor-pointer shadow-[0_0_8px_rgba(0,240,255,0.2)]">
+<div class="absolute right-1 top-1 h-4 w-4 bg-primary-container rounded-full shadow-[0_0_8px_var(--tw-colors-primary-container)]"></div>
+</div>
+</div>
+<!-- Toggle: Haptic Feedback -->
+<div class="flex justify-between items-center opacity-50">
+<label class="font-label-caps text-label-caps text-on-surface-variant tracking-widest">HAPTIC FEEDBACK</label>
+<!-- Inactive Toggle -->
+<div class="w-12 h-6 rounded-full bg-surface-container-highest border border-outline-variant relative cursor-pointer">
+<div class="absolute left-1 top-1 h-4 w-4 bg-outline-variant rounded-full"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 3: Account Link (Full Width) -->
+<section class="col-span-1 md:col-span-12 bg-surface-container-low/60 backdrop-blur-md border border-outline-variant/20 rounded-xl p-panel-padding flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mt-4 relative overflow-hidden">
+<!-- Subtle Hex Pattern Overlay for this specific card -->
+<div class="absolute inset-0 pointer-events-none opacity-[0.03] bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSI0MCI+PHBhdGggZD0iTTEyIDBMMjQgMTBWMzBMMTIgNDBMMCAzMFYxMEwxMiAwWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjEiLz48L3N2Zz4=')]"></div>
+<div class="flex flex-col gap-2 z-10">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary" data-icon="sync">sync</span>
+<h2 class="font-headline-md text-headline-md text-on-surface">Neural Link Status</h2>
+</div>
+<p class="font-body-base text-body-base text-on-surface-variant max-w-lg">
+                            Synchronize your progress across multiple terminal nodes. Current node is establishing a stable connection to the central hive.
+                        </p>
+</div>
+<div class="flex gap-4 w-full md:w-auto z-10">
+<button class="px-6 py-3 rounded-lg border border-primary-container text-primary-container font-label-caps text-label-caps hover:bg-primary-container/10 transition-colors w-full md:w-auto flex items-center justify-center gap-2 relative overflow-hidden">
+<span class="absolute inset-0 bg-primary-container/10 blur-md opacity-0 hover:opacity-100 transition-opacity"></span>
+<span class="material-symbols-outlined text-sm" data-icon="cloud_off">cloud_off</span>
+                            DISCONNECT
+                        </button>
+<button class="px-6 py-3 rounded-lg bg-primary-container text-on-primary-container font-label-caps text-label-caps hover:bg-primary shadow-[0_0_15px_rgba(0,240,255,0.4)] transition-all duration-300 w-full md:w-auto flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="save">save</span>
+                            FORCE SYNC
+                        </button>
+</div>
+</section>
+</div>
+</main>
+</div>
+<!-- BottomNavBar (Mobile) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 pb-safe bg-black/30 backdrop-blur-md rounded-t-xl border-t border-cyan-400/30 shadow-[0_-4px_20px_rgba(0,240,255,0.15)] font-['Space_Grotesk'] text-[10px] uppercase tracking-tighter">
+<!-- Tab 1: Play (Inactive) -->
+<a class="flex flex-col items-center justify-center text-cyan-900 opacity-60 hover:opacity-100 hover:scale-110 transition-transform w-16" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="videogame_asset">videogame_asset</span>
+<span>Play</span>
+</a>
+<!-- Tab 2: Global (Inactive) -->
+<a class="flex flex-col items-center justify-center text-cyan-900 opacity-60 hover:opacity-100 hover:scale-110 transition-transform w-16" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="emoji_events">emoji_events</span>
+<span>Global</span>
+</a>
+<!-- Tab 3: System (Active - Semantic Match) -->
+<a class="flex flex-col items-center justify-center text-cyan-400 drop-shadow-[0_0_5px_rgba(0,240,255,0.5)] hover:opacity-100 hover:scale-110 transition-transform w-16 relative" href="#">
+<div class="absolute inset-0 bg-cyan-400/20 blur-md rounded-full -z-10 animate-pulse"></div>
+<span class="material-symbols-outlined mb-1" data-icon="settings_input_component" data-weight="fill" style="font-variation-settings: 'FILL' 1;">settings_input_component</span>
+<span>System</span>
+</a>
+</nav>
+</body></html>

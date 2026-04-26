@@ -1,0 +1,6 @@
+google-genai>=1.0.0
+nltk>=3.9
+editdistance>=0.8.1
+pandas>=2.0
+zemberek-python>=0.2.3
+NlpToolkit-WordNet>=1.0.24
