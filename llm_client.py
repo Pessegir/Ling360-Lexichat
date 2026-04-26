@@ -59,11 +59,21 @@ class GeminiClient(LLMClient):
         for m in messages:
             role = "user" if m["role"] == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
-        config = types.GenerateContentConfig(
+
+        # Disable model "thinking" for short conversational replies. The 2.5
+        # Flash family otherwise spends most of max_output_tokens on internal
+        # reasoning, leaving only a few tokens for the visible reply.
+        config_kwargs = dict(
             system_instruction=system,
             max_output_tokens=max_tokens,
             temperature=0.9,
         )
+        try:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        except (AttributeError, TypeError):
+            # Older SDK / models without thinking control — skip silently.
+            pass
+        config = types.GenerateContentConfig(**config_kwargs)
 
         last_err: Exception | None = None
         for model_idx in range(self._preferred, len(self._chain)):

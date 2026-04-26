@@ -3,6 +3,7 @@ silence filler, prologue chat, batched word metadata."""
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import re
@@ -14,6 +15,13 @@ from .config import SILENCE_LLM_PROBABILITY
 from .text_utils import UnicodeTr
 
 LLM_DEBUG = os.environ.get("LEXICHAT_DEBUG") == "1"
+
+# Silence google-genai's INFO logs ("AFC is enabled...") and httpx request
+# logs ("HTTP Request: POST..."). They bleed into game output unhelpfully.
+# Set LEXICHAT_DEBUG=1 to keep them visible for debugging.
+if not LLM_DEBUG:
+    for name in ("google_genai", "google_genai.models", "httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 # --------------------------------------------------------------------------
@@ -123,11 +131,13 @@ MUTLAK KURALLAR — ASLA İHLAL ETMEYECEKSİN:
 - ASLA "Tebrikler, kazandınız!", "Doğru cevap!", "Yeni soruya geçelim" deme.
 - Cevabın 1 ya da 2 kısa cümleyi geçmesin.
 
+OYUN MODU: {MODE_DESCRIPTION}
+{MODE_RULES}
+
 TARZ:
 - Daima "siz" ve "efendim".
 - Türkçe, sohbet havası, TV sunucusu.
 - Oyuncu ipucundaki bir kelimenin anlamını sorarsa ("X ne demek?"), önce yumuşak bir geçiş ("Biliyorsunuz...", "Aa evet...", "Şöyle düşünün...") sonra TEK cümlelik açıklama yap.
-- Oyuncu "bilmiyorum/zor/aklıma gelmiyor" derse, cesaretlendir ve "h" yazarak harf, "ipucu" yazarak yardım alabileceğini hatırlat. Direkt cevabı verme.
 - Oyuncu sohbet ederse ("vay be", "hmm"), kısaca karşılık ver ve dikkatini ipucuna çek.
 
 OYUN DURUMU (sen değiştirme, sadece bunu kullan):
@@ -136,8 +146,21 @@ OYUN DURUMU (sen değiştirme, sadece bunu kullan):
 - Toplam puan: {SCORE}
 """
 
+_HINT_PHASE_RULES = (
+    "- Oyuncu \"bilmiyorum/zor/aklıma gelmiyor\" derse, cesaretlendir ve "
+    "\"h\" yazarak harf, \"ipucu\" yazarak yardım alabileceğini hatırlat. "
+    "Direkt cevabı verme."
+)
+_ANSWER_PHASE_RULES = (
+    "- DİKKAT: Oyuncu cevap verme moduna girdi (\"bb\" tuşuna bastı). "
+    "Bu modda HARF ALAMAZ. ASLA \"h yazın\" veya \"harf alın\" deme. "
+    "Sadece \"ipucu\" yazarak yardım alabileceğini hatırlat. Direkt cevabı verme."
+)
+_HINT_PHASE_DESC = "İpucu fazı (oyuncu serbestçe harf alabilir veya tahmin yapabilir)."
+_ANSWER_PHASE_DESC = "Cevap fazı (oyuncu \"bb\" dedi, 45 saniyesi var, harf alamaz)."
 
-def host_system_prompt(state, round_ctx):
+
+def host_system_prompt(state, round_ctx, in_answer_mode: bool = False):
     syns = round_ctx.get("synonyms") or []
     if isinstance(syns, str):
         syns = [] if syns == "None" else [syns]
@@ -147,6 +170,8 @@ def host_system_prompt(state, round_ctx):
         CLUE=round_ctx["clue"],
         REVEALED=" ".join(state.revealed_letters) if state.revealed_letters else "(henüz yok)",
         SCORE=state.total_score,
+        MODE_DESCRIPTION=_ANSWER_PHASE_DESC if in_answer_mode else _HINT_PHASE_DESC,
+        MODE_RULES=_ANSWER_PHASE_RULES if in_answer_mode else _HINT_PHASE_RULES,
     )
 
 
@@ -184,7 +209,20 @@ def sanitize_reply(text, word, synonyms):
 # --------------------------------------------------------------------------
 
 
-def scripted_stuck_reply():
+def scripted_stuck_reply(in_answer_mode: bool = False):
+    """Reply when the player signals they're stuck.
+
+    in_answer_mode = True means the player has pressed 'bb' and is now in the
+    45s answer phase, where letter requests are NOT allowed. We must NOT
+    suggest pressing 'h' in that case.
+    """
+    if in_answer_mode:
+        return random.choice([
+            "\"ipucu\" derseniz size bir ipucu hazırlayabilirim...",
+            "Vazgeçmek yok efendim, bir ipucu ile bulabilirsiniz...",
+            "Bir ipucu mu istesek..? Yardımı dokunabilir...",
+            "Düşünmeye devam edelim efendim, ipucu da isteyebilirsiniz...",
+        ])
     return random.choice([
         "Efendim, hadi bir harf mi alsak..? \"h\" yazmanız yeter.",
         "\"ipucu\" derseniz size bir ipucu hazırlayabilirim...",
@@ -193,7 +231,18 @@ def scripted_stuck_reply():
     ])
 
 
-def scripted_silence_reply():
+def scripted_silence_reply(in_answer_mode: bool = False):
+    """Proactive line when the player goes quiet. Phase-aware: never suggest
+    'h' (letter request) during the 45s answer phase."""
+    if in_answer_mode:
+        return random.choice([
+            "Zaman akıyor efendim...",
+            "Hâlâ orada mısınız..?",
+            "Düşünüyorsunuz, biliyorum... Yine de zaman akıyor...",
+            "Hmm... İpucu ister misiniz?",
+            "Bakalım, bir şey geldi mi aklınıza?",
+            "Efendim, dalıp gittiniz sanırım...",
+        ])
     return random.choice([
         "Zaman akıyor efendim...",
         "Hâlâ orada mısınız..?",
@@ -210,45 +259,50 @@ def scripted_silence_reply():
 # --------------------------------------------------------------------------
 
 
-def llm_host_reply(llm, state, round_ctx, user_input, history):
+def llm_host_reply(llm, state, round_ctx, user_input, history, in_answer_mode: bool = False):
     """Free-form host reply for inputs that don't match any keyword branch.
 
     history: list of (role, text) for THIS round only.
+    in_answer_mode: True when the player has pressed 'bb' (cannot request letters).
     Returns a safe string, never None. Never leaks the target word.
     """
     if llm is None:
-        return scripted_stuck_reply()
+        return scripted_stuck_reply(in_answer_mode)
 
     messages = [{"role": role, "content": text} for role, text in history[-6:]]
     messages.append({"role": "user", "content": user_input})
 
     try:
         raw = llm.chat(
-            system=host_system_prompt(state, round_ctx),
+            system=host_system_prompt(state, round_ctx, in_answer_mode),
             messages=messages,
-            max_tokens=70,
+            max_tokens=150,
         )
     except (LLMError, Exception):
-        return scripted_stuck_reply()
+        return scripted_stuck_reply(in_answer_mode)
 
     clean = sanitize_reply(raw, round_ctx["word"], round_ctx.get("synonyms"))
-    return clean if clean else scripted_stuck_reply()
+    return clean if clean else scripted_stuck_reply(in_answer_mode)
 
 
-def llm_silence_reply(llm, state, round_ctx):
-    """Proactive line when player goes quiet. 70% scripted, 30% generated."""
+def llm_silence_reply(llm, state, round_ctx, in_answer_mode: bool = False):
+    """Proactive line when player goes quiet. 70% scripted, 30% generated.
+
+    in_answer_mode: True when player has pressed 'bb'. Scripted/LLM lines
+    will not suggest 'h' (letter request) in that mode.
+    """
     if random.random() > SILENCE_LLM_PROBABILITY or llm is None:
-        return scripted_silence_reply()
+        return scripted_silence_reply(in_answer_mode)
     try:
         raw = llm.chat(
-            system=host_system_prompt(state, round_ctx),
+            system=host_system_prompt(state, round_ctx, in_answer_mode),
             messages=[{"role": "user", "content": "(Oyuncu sessiz kaldı, nazikçe dikkatini çek.)"}],
-            max_tokens=60,
+            max_tokens=120,
         )
     except Exception:
-        return scripted_silence_reply()
+        return scripted_silence_reply(in_answer_mode)
     clean = sanitize_reply(raw, round_ctx["word"], round_ctx.get("synonyms"))
-    return clean if clean else scripted_silence_reply()
+    return clean if clean else scripted_silence_reply(in_answer_mode)
 
 
 # --------------------------------------------------------------------------
@@ -294,6 +348,6 @@ def prologue_reply(llm, messages):
         llm,
         PROLOGUE_SYSTEM_PROMPT,
         messages,
-        max_tokens=70,
+        max_tokens=150,
         fallback="Çok sevindim efendim.",
     )

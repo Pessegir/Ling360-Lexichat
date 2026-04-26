@@ -213,7 +213,7 @@ def cli_round_time(state, round_idx, word, word_list, origin_list, compound_list
 
         if line is None:
             if time.time() >= next_silence:
-                print("\n" + host.llm_silence_reply(llm, state, round_ctx))
+                print("\n" + host.llm_silence_reply(llm, state, round_ctx, in_answer_mode=True))
                 next_silence = time.time() + random.uniform(SILENCE_MIN_SECONDS, SILENCE_MAX_SECONDS)
             continue
 
@@ -265,7 +265,7 @@ def cli_round_time(state, round_idx, word, word_list, origin_list, compound_list
                 print("\n", reaction)
             else:
                 state.round_history.append(("user", line))
-                reply = host.llm_host_reply(llm, state, round_ctx, line, state.round_history)
+                reply = host.llm_host_reply(llm, state, round_ctx, line, state.round_history, in_answer_mode=True)
                 print("\n" + reply)
                 state.round_history.append(("assistant", reply))
 
