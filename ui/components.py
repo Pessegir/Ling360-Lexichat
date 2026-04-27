@@ -8,6 +8,7 @@ from __future__ import annotations
 import html as html_lib
 
 from game.config import APP_NAME, APP_TAGLINE
+from game.text_utils import tr_upper
 
 
 # --------------------------------------------------------------------------
@@ -58,7 +59,8 @@ def tile_board(st, word_or_length, revealed_letters=None):
     tiles_html = []
     for i, slot in enumerate(slots):
         if i < len(revealed) and revealed[i] != "_  " and len(revealed[i].strip()) >= 1:
-            ch = html_lib.escape(revealed[i].strip()[:1].upper())
+            # Turkish-correct uppercase: ı → I, i → İ, ş → Ş, etc.
+            ch = html_lib.escape(tr_upper(revealed[i].strip()[:1]))
             tiles_html.append(f'<div class="lexi-tile revealed"><span>{ch}</span></div>')
         else:
             tiles_html.append('<div class="lexi-tile"><span>&nbsp;</span></div>')
@@ -80,6 +82,40 @@ def clue_card(st, text: str, label: str = "İPUCU"):
         f'<div class="lexi-clue"><span class="lexi-clue-label">{html_lib.escape(label)}</span>{safe}</div>',
         unsafe_allow_html=True,
     )
+
+
+def info_chips(st, revealed: dict):
+    """Render the row of revealed-info chips above the clue.
+
+    revealed: dict with optional keys 'function', 'structure', 'origin',
+    'compound', etc. Empty dict → nothing renders.
+    """
+    if not revealed:
+        return
+
+    chips = []
+    label_map = {
+        "function": "TÜR",
+        "structure": "YAPI",
+        "origin": "KÖKEN",
+        "compound": "BİRLEŞİK",
+    }
+    for key, label in label_map.items():
+        val = revealed.get(key)
+        if val and val != "None":
+            safe_val = html_lib.escape(str(val))
+            chips.append(
+                f'<span class="lexi-info-chip">'
+                f'<span class="lexi-info-chip-label">{label}</span>'
+                f'<span class="lexi-info-chip-value">{safe_val}</span>'
+                f'</span>'
+            )
+
+    if chips:
+        st.markdown(
+            f'<div class="lexi-info-row">{"".join(chips)}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 # --------------------------------------------------------------------------

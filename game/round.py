@@ -38,12 +38,36 @@ def letter_request(word, revealed_letters):
 # --------------------------------------------------------------------------
 
 
+def _hint_example(round_idx, example_sentences):
+    """Return an example-sentence hint, or None if no usable example exists."""
+    ex = example_sentences[round_idx]
+    if not ex or ex == "None" or "None" in ex.strip().split():
+        return None
+    return ["Örnek cümle verebilirim belki...", ex]
+
+
+def _hint_compound_or_def(round_idx, compound_list, additional_defs, definition_list):
+    if compound_list[round_idx] != "None":
+        return [f"Efendim buna dikkat... {compound_list[round_idx]}"]
+    if additional_defs[round_idx] and additional_defs[round_idx] != "None":
+        return [f"Şöyle de tanımlanabilir...\n{additional_defs[round_idx]}"]
+    return [f"Biraz daha düşünün efendim, tekrar okuyun soruyu...\n{definition_list[round_idx]}"]
+
+
+def _hint_synonym(round_idx, synonym_list):
+    syn_phrase = get_synonym_phrase(synonym_list, round_idx)
+    if syn_phrase == "None":
+        return None
+    return ["Hmm...", syn_phrase, "Düşünün biraz daha..."]
+
+
 def give_hint(chance_list, round_idx, word, example_sentences, compound_list,
               additional_defs, definition_list, synonym_list):
     """Dispatch a hint based on a randomized chance_list. Mutates chance_list.
 
-    Returns a list of message strings. Driver prints them with whatever
-    pacing/formatting it wants.
+    Returns a list of message strings. If the dispatched hint type has no
+    usable content (e.g. example sentence is "None"), tries other types in
+    a fallback order before giving up with a generic line.
     """
     if not chance_list:
         return [random.choice([
@@ -57,43 +81,57 @@ def give_hint(chance_list, round_idx, word, example_sentences, compound_list,
     msgs: list[str] = []
 
     if chance_num % 3 == 0:
-        msgs.append("Örnek cümle verebilirim belki...")
-        msgs.append(example_sentences[round_idx])
-        for v in (3, 9):
-            if v in chance_list:
-                chance_list.remove(v)
+        result = _hint_example(round_idx, example_sentences)
+        if result:
+            msgs = result
+            for v in (3, 9):
+                if v in chance_list:
+                    chance_list.remove(v)
+        else:
+            # No example available — fall through to compound/def hint instead
+            msgs = _hint_compound_or_def(round_idx, compound_list, additional_defs, definition_list)
+            for v in (3, 9, 5, 25, 65):
+                if v in chance_list:
+                    chance_list.remove(v)
 
     elif chance_num % 5 == 0:
-        if compound_list[round_idx] != "None":
-            msgs.append(f"Efendim buna dikkat... {compound_list[round_idx]}")
-        elif additional_defs[round_idx] and additional_defs[round_idx] != "None":
-            msgs.append(f"Şöyle de tanımlanabilir...\n{additional_defs[round_idx]}")
-        else:
-            msgs.append(f"Biraz daha düşünün efendim, tekrar okuyun soruyu...\n{definition_list[round_idx]}")
+        msgs = _hint_compound_or_def(round_idx, compound_list, additional_defs, definition_list)
         for v in (5, 25, 65):
             if v in chance_list:
                 chance_list.remove(v)
 
     elif chance_num % 2 == 0:
-        msgs.append("Hmm...")
-        syn_phrase = get_synonym_phrase(synonym_list, round_idx)
-        if syn_phrase != "None":
-            msgs.append(syn_phrase)
-        for v in (2, 4):
-            if v in chance_list:
-                chance_list.remove(v)
-        msgs.append("Düşünün biraz daha...")
+        result = _hint_synonym(round_idx, synonym_list)
+        if result:
+            msgs = result
+            for v in (2, 4):
+                if v in chance_list:
+                    chance_list.remove(v)
+        else:
+            # No synonyms — fall back to compound/def
+            msgs = _hint_compound_or_def(round_idx, compound_list, additional_defs, definition_list)
+            for v in (2, 4, 5, 25, 65):
+                if v in chance_list:
+                    chance_list.remove(v)
 
     elif chance_num % 7 == 0:
-        msgs.append("Hmm... Belki bu yardımcı olabilir...")
-        msgs.append(example_sentences[round_idx])
-        msgs.append("Ayrıca...")
-        syn_phrase = get_synonym_phrase(synonym_list, round_idx)
-        if syn_phrase != "None":
-            msgs.append(syn_phrase)
+        result = _hint_example(round_idx, example_sentences)
+        if result:
+            msgs = ["Hmm... Belki bu yardımcı olabilir...", result[1]]
+        else:
+            msgs = _hint_compound_or_def(round_idx, compound_list, additional_defs, definition_list)
+        syn = _hint_synonym(round_idx, synonym_list)
+        if syn:
+            msgs.append("Ayrıca...")
+            msgs.append(syn[1])
         if 7 in chance_list:
             chance_list.remove(7)
         msgs.append("Odaklanırsanız bulursunuz bence... Tekrar okuyun...")
+
+    # Final guard: if msgs ended up empty for any reason, give a generic line
+    if not msgs:
+        msgs = ["Biraz daha düşünün efendim, tekrar okuyun soruyu...",
+                definition_list[round_idx]]
 
     return msgs
 
@@ -132,13 +170,43 @@ def react_to_guess(raw, round_idx, word, tkn, history, synonym_list,
     if raw in history or any(it in history for it in tkn):
         return "Bunu zaten söylediniz, tekrar düşünün..."
 
-    if len(tkn) == 1 and editdistance.distance(raw, word) <= 2 and round_idx >= 6:
-        return random.choice([
-            "Çok yaklaştınız, acaba bir iki harf mi değiştirsek..?",
-            f"{raw} doğru muydu yoksa birkaç harf mi farklıydı?",
-        ])
+    # "Çok yaklaştınız" feedback. Two conditions, both must hold:
+    #   1. Absolute distance is small enough for the word's length:
+    #      - len ≤ 5 → distance must be ≤ 1 (a single typo)
+    #      - len 6-8 → distance ≤ 2
+    #      - len 9+  → distance ≤ 3
+    #   2. Distance/length ratio ≤ 0.4 (so 'olun' vs 'ozan' at 50% won't
+    #      qualify even though absolute is 2). This is the key fix —
+    #      the original "≤2 flat" rule called every short word with two
+    #      different letters "close", which felt cheap.
+    if len(tkn) == 1 and len(raw) >= 3 and len(word) >= 3:
+        dist = editdistance.distance(raw, word)
+        if len(word) <= 5:
+            abs_max = 1
+        elif len(word) <= 8:
+            abs_max = 2
+        else:
+            abs_max = 3
+        ratio = dist / len(word)
+        if dist <= abs_max and ratio <= 0.4:
+            return random.choice([
+                "Çok yaklaştınız, acaba bir iki harf mi değiştirsek..?",
+                f"\"{raw}\" doğru muydu yoksa birkaç harf mi farklıydı?",
+                "Yaklaştınız efendim, harflere dikkat...",
+            ])
 
-    if len(tkn) == 1 and " " not in raw and len(raw) <= 15:
+    # Short conversational acknowledgments — these are NOT guesses. Let
+    # the LLM handle them with full chat context (e.g. "ver" after the
+    # host just offered an example sentence).
+    SHORT_CONVERSATIONAL = {
+        "ver", "evet", "olur", "tamam", "hayır", "yok", "belki",
+        "neden", "niye", "yani", "yine", "iyi", "peki", "tabii",
+    }
+    if raw in SHORT_CONVERSATIONAL:
+        return None
+
+    # Real guess attempts: 4+ chars, single token. Generic "wrong guess".
+    if len(tkn) == 1 and " " not in raw and 4 <= len(raw) <= 15:
         return random.choice([
             "Süre akıyor, tekrar deneyin...",
             "Biraz daha düşünün isterseniz...",
@@ -261,6 +329,75 @@ def round_timeout_lines(word, round_score, total_score):
             f"Ah, ah... {total_score} puana geriledik...\nMoral bozmak yok devam edelim...",
         ]),
     ]
+
+
+# Tier 1: gentle teases for the first couple of reminders.
+_ALMOST_HAD_IT_GENTLE = [
+    "Çoktan söylediniz bile efendim, bir tek \"bb\" basmanız kalmıştı...",
+    "Az önce ne demiştiniz hatırlıyor musunuz..?",
+    "Az önce çıktı sanki ağzınızdan, bir daha gelir mi acaba?",
+    "Hatırlayın, biraz önce ucundan dönmüştü...",
+    "İpin ucunu bir kere yakaladınız efendim, bırakmayın...",
+    "Söylediğinizi söylemiştiniz, bir de \"bb\" deyiverin...",
+]
+
+# Tier 2: pointed insistence, when the player keeps ignoring the answer
+# they typed several turns ago.
+_ALMOST_HAD_IT_INSISTENT = [
+    "Az önce ne dediniz, bir daha söyleyin..?",
+    "Fazla uzaklaşmayın efendim, çok yakındaydık...",
+    "Başka yere gitmeyin, doğru kelimeyi söylediniz az önce...",
+    "Sırf \"bb\" demek için bekliyorum efendim, hadi şu kelimeyi tekrarlayın...",
+    "Bir daha söyleyin lütfen, ben \"bb\"yi duyacağım...",
+    "İpin ucu hâlâ elinizde efendim — bırakmayın da kaçırmayın...",
+    "Ah, ah, az önce söylediğiniz şey... Hatırlamaya çalışın...",
+]
+
+
+def almost_had_it_reminder(reminded_count: int = 0):
+    """Teasing line for the player who said the answer but didn't press bb.
+
+    reminded_count: how many times we've already reminded them this round.
+    0-2 → gentle bank. 3+ → insistent bank.
+    """
+    bank = _ALMOST_HAD_IT_INSISTENT if reminded_count >= 2 else _ALMOST_HAD_IT_GENTLE
+    return random.choice(bank)
+
+
+# Meme/absurd replies for when the player types gibberish (≤3 chars, not a
+# game keyword, not a conversational ack). Kept rare on purpose — the
+# comedy is in the surprise.
+_NONSENSE_MEMES = [
+    "Ne dersiniz, Cemil olabilir mi?",
+    "Belki Yıldız Tilbe'den bir şarkı arıyorsunuzdur..?",
+    "Hmm, klavyenize bir şey mi düştü efendim?",
+    "Kedinin pati izi mi bu, yoksa stratejik bir tahmin mi?",
+    "Şifrenizi mi giriyorsunuz, yoksa cevabı mı arıyorsunuz?",
+    "Aman ha, telefonunuzu sallamadan yazın efendim...",
+    "Köpek mi geçti klavyeden..?",
+    "Bu bir Mors alfabesi mi, yoksa şifre mi?",
+    "Klavyeyi yumruklamak çözüm değil efendim...",
+    "Yorgunluktan herhalde, bir kahve içip dönelim mi?",
+]
+
+
+def nonsense_meme():
+    """Funny absurd reply for repeated gibberish input."""
+    return random.choice(_NONSENSE_MEMES)
+
+
+_REPETITION_NUDGES = [
+    "Kurtulun ondan efendim, başka bir kelime düşünün...",
+    "Bu değil işte, unutun gitsin onu...",
+    "Aynı kelimeyle çıkış yok efendim, başka bir şey deneyin...",
+    "Israrcı oldu epey... Vazgeçin de bir başka kelime düşünelim...",
+    "Israr etmeyin efendim, bu o değil...",
+]
+
+
+def repetition_nudge():
+    """Reply when the player keeps typing the same wrong thing (3+ times)."""
+    return random.choice(_REPETITION_NUDGES)
 
 
 def end_game_lines(score, username, ran_out_of_time):

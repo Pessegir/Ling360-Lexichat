@@ -24,8 +24,39 @@ class GameState:
     round_history: list = field(default_factory=list)  # [(role, text)] reset each round
     username: str = ""
 
+    # "Almost had it" memory — set when the player types the exact answer
+    # without pressing 'bb' first. Used to tease them in subsequent
+    # stuck/wrong-guess turns ("Az önce çıktı sanki ağzınızdan...").
+    # Reset per round. Escalates with reminded_count:
+    #   0      → no memory, no teasing
+    #   1-2    → gentle teases ("ipin ucunu...")
+    #   3+     → pointed insistence ("az önce ne dediniz?")
+    almost_had_it: bool = False
+    almost_reminded_count: int = 0
+
+    # Gibberish detection. Counts inputs that don't look like a real
+    # Turkish word AND aren't game keywords. Used to emit meme-style
+    # replies when the player is mashing the keyboard.
+    nonsense_streak: int = 0      # consecutive nonsense inputs (resets on real input)
+    nonsense_total: int = 0       # total nonsense inputs in this round
+
+    # Per-round Counter of {input: count} so we can react to "you've now
+    # said the same wrong thing 5 times". Reset per round.
+    input_counts: dict = field(default_factory=dict)
+
     def reset_revealed(self):
         self.revealed_letters = []
 
     def reset_round_history(self):
         self.round_history = []
+
+    def reset_almost_memory(self):
+        self.almost_had_it = False
+        self.almost_reminded_count = 0
+
+    def reset_nonsense_counters(self):
+        self.nonsense_streak = 0
+        self.nonsense_total = 0
+
+    def reset_input_counts(self):
+        self.input_counts = {}

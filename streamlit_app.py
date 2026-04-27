@@ -12,8 +12,18 @@ from __future__ import annotations
 
 import streamlit as st
 
+try:
+    from streamlit_autorefresh import st_autorefresh
+except ImportError:
+    st_autorefresh = None
+
 from game.config import APP_NAME, APP_TAGLINE, TOTAL_GAME_TIME, TOTAL_ROUNDS
+from game.round import end_game_lines
+from game.session import build_new_game, load_static_resources
+from game.state import GameState
+from llm_client import LLMError, GeminiClient
 from ui import theme
+from ui.arena import render_arena
 from ui.components import host_bubble, wordmark
 
 
@@ -43,8 +53,26 @@ DEFAULTS = {
     "provider": "gemini",     # gemini / huggingface (later) / demo
     "difficulty": "normal",
     "game_state": None,       # GameState instance once a game starts
+    "llm": None,
     "word_list": None,
     "definition_list": None,
+    "additional_defs": None,
+    "synonym_list": None,
+    "function_list": None,
+    "compound_list": None,
+    "origin_list": None,
+    "structure_list": None,
+    "example_sentences": None,
+    "corpus": None,           # (cleaned_tokens, sorted_keywords)
+    "chat_log": [],
+    "round_idx": 0,
+    "round_ctx": None,
+    "chance_list": None,
+    "list_active_input": [],
+    "last_input_at": None,
+    "silence_threshold": None,
+    "last_tick_at": None,
+    "revealed_info": {},
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -186,19 +214,81 @@ def render_home():
 # --------------------------------------------------------------------------
 
 
+@st.cache_resource(show_spinner=False)
+def _cached_static_resources():
+    """Load Zemberek + WordNet + gts.json + corpus once per server lifetime."""
+    return load_static_resources()
+
+
+def _make_llm():
+    if st.session_state.provider == "gemini" and st.session_state.api_key:
+        try:
+            return GeminiClient(api_key=st.session_state.api_key)
+        except LLMError as e:
+            st.error(f"Gemini bağlantı hatası: {e}")
+            return None
+    # Demo mode or no key → run scripted-only
+    return None
+
+
 def render_loading():
     wordmark(st, level="h2")
     st.write("")
-    host_bubble(st, f"Hazırlanıyorum efendim, biraz bekleyin lütfen...")
-    st.spinner("Kelimeler ve ipuçları yükleniyor...")
-    st.info(
-        "Bu ekran şu an bir yer tutucudur. Phase 4 step 4'te oyun motoru "
-        "buraya bağlanacak ve gerçek arena ekranı gözükecek.",
-        icon="🔧",
-    )
-    if st.button("← Ana sayfaya dön", type="secondary"):
-        st.session_state.phase = "home"
-        st.rerun()
+    host_bubble(st, "Hazırlanıyorum efendim, biraz bekleyin lütfen...")
+    st.write("")
+
+    progress = st.progress(0, text="Sözlük ve dil araçları yükleniyor...")
+    try:
+        resources = _cached_static_resources()
+    except Exception as e:
+        st.error(f"Kaynaklar yüklenirken hata: {e}")
+        if st.button("← Ana sayfaya dön", type="secondary"):
+            st.session_state.phase = "home"
+            st.rerun()
+        return
+    progress.progress(40, text="Yapay zekâ bağlanıyor...")
+
+    llm = _make_llm()
+    progress.progress(60, text="14 kelime seçiliyor...")
+
+    try:
+        payload = build_new_game(resources, llm)
+    except Exception as e:
+        st.error(f"Oyun hazırlanırken hata: {e}")
+        if st.button("← Ana sayfaya dön", type="secondary"):
+            st.session_state.phase = "home"
+            st.rerun()
+        return
+    progress.progress(100, text="Hazır!")
+
+    # Seed all session state for the game
+    full_username = f"{st.session_state.player_name} {st.session_state.player_address}"
+    st.session_state.game_state = GameState(username=full_username)
+    st.session_state.llm = llm
+    st.session_state.word_list = payload["word_list"]
+    st.session_state.definition_list = payload["definition_list"]
+    st.session_state.additional_defs = payload["additional_defs"]
+    st.session_state.synonym_list = payload["synonym_list"]
+    st.session_state.function_list = payload["function_list"]
+    st.session_state.compound_list = payload["compound_list"]
+    st.session_state.origin_list = payload["origin_list"]
+    st.session_state.structure_list = payload["structure_list"]
+    st.session_state.example_sentences = payload["example_sentences"]
+    st.session_state.corpus = resources["corpus"]
+    st.session_state.chat_log = []
+
+    # Initial host greeting
+    st.session_state.chat_log.append((
+        "assistant",
+        f"Merhaba {full_username}, hoşgeldiniz! İlk soruyla başlıyoruz...",
+    ))
+
+    # Initialize round 0 — done via arena helper
+    from ui.arena import _start_round
+    _start_round(st, 0)
+
+    st.session_state.phase = "playing"
+    st.rerun()
 
 
 # --------------------------------------------------------------------------
@@ -221,16 +311,53 @@ def render_history():
 # --------------------------------------------------------------------------
 
 
+def render_end_placeholder():
+    wordmark(st, level="h2")
+    st.write("")
+    state = st.session_state.game_state
+    if state:
+        score = state.total_score
+        ran_out = state.game_over
+        host_bubble(st, end_game_lines(score, state.username, ran_out))
+        st.markdown(f"### Toplam puan: **{score:,}**")
+    st.info(
+        "Tam bitiş ekranı (puan istatistikleri, 'tekrar oyna' butonu) "
+        "Phase 4 step 5'te gelecek.",
+        icon="🔧",
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🏠 Ana sayfa", type="primary", use_container_width=True):
+            for k in list(st.session_state.keys()):
+                if k not in ("api_key", "provider", "player_name", "player_address"):
+                    del st.session_state[k]
+            st.session_state.phase = "home"
+            st.rerun()
+    with col2:
+        if st.button("📊 Skorlar", type="secondary", use_container_width=True):
+            st.session_state.phase = "history"
+            st.rerun()
+
+
 PHASE_RENDERERS = {
     "home": render_home,
     "loading": render_loading,
+    "playing": lambda: render_arena(st),
+    "end": render_end_placeholder,
     "history": render_history,
-    # playing, answering, between, end → coming in steps 4 & 5
 }
 
 
 def main():
     render_sidebar()
+
+    # No autorefresh: each interaction triggers a single Streamlit rerun.
+    # The visible timer updates whenever the user takes an action; in
+    # between, it appears frozen but the underlying math remains correct
+    # (computed from wall clock on every rerun). We can add a JS-side
+    # ticker later that animates the displayed time without forcing a
+    # Python rerun.
+
     renderer = PHASE_RENDERERS.get(st.session_state.phase, render_home)
     renderer()
 

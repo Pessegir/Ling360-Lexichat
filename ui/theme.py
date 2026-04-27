@@ -62,6 +62,41 @@ def stylesheet() -> str:
     font-family: {FONT_BODY};
 }}
 
+/* Kill EVERY way Streamlit fades the page during a rerun. The default
+   running indicator dims the whole app via opacity transitions on
+   stAppViewContainer + several wrapper divs. We force opacity:1 across
+   the board and disable transitions globally during rerun states. */
+.stApp,
+.stApp > *,
+.stApp [data-testid="stAppViewContainer"],
+.stApp [data-testid="stAppViewContainer"] > *,
+.stApp [data-testid="stMain"],
+.stApp [data-testid="stMainBlockContainer"],
+.stApp .main,
+.stApp .main > * {{
+    opacity: 1 !important;
+}}
+
+/* Some Streamlit versions add a class during reruns. Catch them all. */
+.stApp[data-test-script-state="running"],
+.stApp[data-test-script-state="rerunning"],
+.stApp[data-test-script-state="running"] *,
+.stApp[data-test-script-state="rerunning"] * {{
+    opacity: 1 !important;
+}}
+
+/* Stop the fade-in/fade-out transition that creates the visible flicker */
+.stApp [data-testid="stAppViewContainer"],
+.stApp [data-testid="stMain"] {{
+    transition: none !important;
+}}
+
+/* Hide the small "Running..." spinner in the corner during reruns */
+[data-testid="stStatusWidget"],
+[data-testid="stToolbar"] {{
+    display: none !important;
+}}
+
 /* Hide Streamlit's default chrome */
 #MainMenu, footer, header[data-testid="stHeader"] {{
     visibility: hidden;
@@ -158,7 +193,9 @@ section[data-testid="stSidebar"] h3 {{
     letter-spacing: 0.06em;
 }}
 
-/* === Chat input (st.chat_input) === */
+/* === Chat input (st.chat_input) ===
+   Streamlit applies a focus shadow that visually shifts the input height —
+   we lock the size and use a glow instead of a border-shift on focus. */
 [data-testid="stChatInput"] {{
     background: {SURFACE};
     border-top: 1px solid {BORDER};
@@ -168,10 +205,27 @@ section[data-testid="stSidebar"] h3 {{
     background: {SURFACE_HIGH};
     color: {TEXT};
     border: 1px solid {BORDER};
+    box-sizing: border-box;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }}
 
-[data-testid="stChatInput"] textarea:focus {{
+[data-testid="stChatInput"] textarea:focus,
+[data-testid="stChatInput"] textarea:focus-visible {{
     border-color: {ACCENT};
+    outline: none !important;
+    /* Soft inset glow instead of a layout-shifting outline */
+    box-shadow: 0 0 0 1px {ACCENT}, 0 0 12px rgba(245, 199, 106, 0.15);
+}}
+
+/* Stop Streamlit's default focus outline from adding extra height */
+[data-testid="stChatInput"] *:focus,
+[data-testid="stChatInput"] *:focus-visible {{
+    outline: none !important;
+}}
+
+/* Lock the wrapper height so the bar never jumps */
+[data-testid="stChatInput"] > div {{
+    border: none !important;
 }}
 
 /* === Chat messages (st.chat_message) === */
@@ -297,11 +351,47 @@ hr {{
     font-weight: 600;
     font-size: 1.4rem;
     color: {TEXT};
-    text-transform: uppercase;
+    /* No text-transform: Turkish casing breaks (ı→I, ş→S) without locale rules. */
 }}
 
 .lexi-tile.revealed span {{
     color: {ACCENT};
+}}
+
+/* Info chips — revealed cues (word type, structure, origin) */
+.lexi-info-row {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin: 0.5rem 0 1rem 0;
+    min-height: 1.8rem;
+}}
+
+.lexi-info-chip {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: rgba(245, 199, 106, 0.08);
+    border: 1px solid {ACCENT_DIM};
+    border-radius: 14px;
+    font-family: {FONT_BODY};
+    font-size: 0.85rem;
+    color: {TEXT};
+}}
+
+.lexi-info-chip-label {{
+    font-family: {FONT_HEADING};
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: {ACCENT};
+    font-weight: 600;
+}}
+
+.lexi-info-chip-value {{
+    color: {TEXT};
 }}
 
 /* Top-bar chips — score / round / timer */
