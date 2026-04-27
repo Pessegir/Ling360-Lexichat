@@ -437,6 +437,74 @@ hr {{
     color: {ACCENT};
 }}
 
+/* Score-pop animation — floating +N or -N near the score chip */
+.lexi-score-pop {{
+    position: relative;
+    display: inline-block;
+    margin-left: 0.5rem;
+    font-family: {FONT_HEADING};
+    font-weight: 700;
+    font-size: 1rem;
+    animation: lexi-score-pop-anim 1.6s ease-out forwards;
+    pointer-events: none;
+}}
+
+.lexi-score-pop.gain {{ color: {SUCCESS}; }}
+.lexi-score-pop.loss {{ color: {WARNING}; }}
+
+@keyframes lexi-score-pop-anim {{
+    0%   {{ transform: translateY(0) scale(0.8); opacity: 0; }}
+    20%  {{ transform: translateY(-4px) scale(1.15); opacity: 1; }}
+    80%  {{ transform: translateY(-18px) scale(1); opacity: 1; }}
+    100% {{ transform: translateY(-26px) scale(0.95); opacity: 0; }}
+}}
+
+/* Answer-phase timer pill (bb mode) */
+.lexi-answer-timer {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.85rem 1.1rem;
+    background: linear-gradient(180deg, {SURFACE} 0%, {SURFACE_HIGH} 100%);
+    border: 1px solid {WARNING};
+    border-radius: 6px;
+    margin: 0.5rem 0 1rem 0;
+    box-shadow: 0 0 0 1px {WARNING}33, 0 0 18px {WARNING}22;
+}}
+
+.lexi-answer-timer-label {{
+    font-family: {FONT_HEADING};
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: {WARNING};
+    font-weight: 600;
+}}
+
+.lexi-answer-timer-value {{
+    font-family: {FONT_HEADING};
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: {WARNING};
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}}
+
+.lexi-answer-timer-bar {{
+    width: 100%;
+    height: 4px;
+    background: {BORDER};
+    border-radius: 2px;
+    overflow: hidden;
+}}
+
+.lexi-answer-timer-fill {{
+    height: 100%;
+    background: {WARNING};
+    transition: width 0.95s linear;
+}}
+
 /* Host bubble (custom rendering — used when we don't go via st.chat_message) */
 .lexi-host-bubble {{
     background: {SURFACE};

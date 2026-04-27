@@ -1,9 +1,9 @@
 """Game arena — the main play screen.
 
-Phase 4 step 4a: hint phase ("playing") only. The bb / answer phase comes
-in step 4b. State machine values used here:
-- "playing" — main hint phase, global timer ticking
-- "between" — between rounds (advance / show score)
+State machine values used here:
+- "playing"   — hint phase, global 5-min timer ticking
+- "answering" — bb phase, global timer paused, 45-s round timer ticking
+- "end"       — game over, handled by streamlit_app.render_end_placeholder
 """
 from __future__ import annotations
 
@@ -18,21 +18,109 @@ PROFILE = os.environ.get("LEXICHAT_PROFILE") == "1"
 
 from game import host
 from game.config import (
-    SILENCE_MAX_SECONDS, SILENCE_MIN_SECONDS, STUCK_KEYWORDS,
-    TOTAL_GAME_TIME, TOTAL_ROUNDS,
+    ROUND_TIME_SECONDS, SILENCE_MAX_SECONDS, SILENCE_MIN_SECONDS,
+    STUCK_KEYWORDS, TOTAL_GAME_TIME, TOTAL_ROUNDS,
 )
 from game.nlp import get_synonym_phrase
 from game.round import (
-    almost_had_it_reminder, end_game_lines, give_hint, letter_request,
-    nonsense_meme, pre_info_messages, react_to_guess, repetition_nudge,
+    almost_had_it_reminder, correct_answer_celebration, end_game_lines,
+    give_hint, letter_request, nonsense_meme, pre_info_messages,
+    react_to_guess, repetition_nudge, round_timeout_lines,
+    score_for_correct_answer,
 )
-from ui.components import clue_card, host_bubble, info_chips, tile_board, topbar, wordmark
+from ui.components import (
+    answer_timer, clue_card, host_bubble, info_chips, tile_board, topbar,
+    wordmark,
+)
 
 
 # --------------------------------------------------------------------------
 # Time management — Streamlit-friendly. No threads. Each rerun computes
 # elapsed time since last_tick_at and decrements the appropriate counter.
 # --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# Chat delivery — staggered reveal so the player can read each line
+# --------------------------------------------------------------------------
+#
+# Every entry in chat_log is (role, text, reveal_at) where reveal_at is a
+# wall-clock timestamp (time.time() seconds). The renderer hides entries
+# whose reveal_at is in the future. _say() handles the queue: by default
+# every host bubble is staggered ~1.6s after the previous queued one, so
+# multi-line responses (round transitions, hints with several lines)
+# appear progressively rather than all at once.
+#
+# Why timestamps instead of partial reruns: Streamlit can't yield partial
+# UI mid-script. So we push everything into chat_log up-front, mark each
+# with when it should appear, and use a 500ms autorefresh to reveal
+# entries as their time comes due. Future TTS will use the same reveal_at
+# (each line speaks when it appears). User messages always reveal_at=now.
+
+CHAT_STAGGER_HOST = 1.6   # seconds between consecutive host lines
+CHAT_STAGGER_HINT = 1.2   # tighter for hint lines (already partially sequential)
+CHAT_STAGGER_SHORT = 0.8  # snappy for one-word reactions (e.g. nonsense memes)
+
+
+def _say(st, role: str, text: str, *, after: float | None = None):
+    """Append a chat bubble with a reveal-time stamp.
+
+    after=None    → host messages stagger CHAT_STAGGER_HOST behind the
+                    previous queued message; user/system reveal immediately.
+    after=0       → reveal immediately (overrides stagger).
+    after=<float> → wait that many seconds after the previous queued msg.
+
+    The pending-cursor is tracked in session_state._next_reveal_at; it
+    catches up to wall-clock as messages get revealed, so a fresh burst
+    of text after a quiet stretch starts at "now", not in the past.
+    """
+    chat_log = st.session_state.chat_log
+    now = time.time()
+    cursor = st.session_state.get("_next_reveal_at") or now
+    if cursor < now:
+        cursor = now
+
+    if role == "user":
+        # User bubbles always reveal immediately and don't push the cursor.
+        reveal_at = now
+    elif after is None:
+        # Default: stagger host/system messages
+        delay = CHAT_STAGGER_HOST if role == "assistant" else 0.0
+        reveal_at = cursor + delay
+        st.session_state._next_reveal_at = reveal_at
+    else:
+        reveal_at = cursor + after
+        st.session_state._next_reveal_at = reveal_at
+
+    chat_log.append((role, text, reveal_at))
+
+
+def _has_pending_chat(st) -> bool:
+    """True if any chat_log entry has reveal_at in the future."""
+    now = time.time()
+    for entry in st.session_state.get("chat_log", []):
+        if len(entry) >= 3 and entry[2] > now:
+            return True
+    return False
+
+
+def _consume_score_pop(st):
+    """If a score-pop is due (its `at` timestamp has passed), return it
+    once and mark consumed so the animation doesn't replay on each rerun.
+
+    Returns a dict with delta/id, or None.
+    """
+    pop = st.session_state.get("score_pop")
+    if not pop:
+        return None
+    now = time.time()
+    if pop.get("at", 0) > now:
+        return None  # not yet — wait for the celebration line to reveal
+    if pop.get("consumed"):
+        return None
+    pop["consumed"] = True
+    pop.setdefault("id", f"pop-{int(pop['at'] * 1000)}")
+    return pop
 
 
 def _tick_global_timer(st):
@@ -52,7 +140,7 @@ def _tick_global_timer(st):
     st.session_state.last_tick_at = now
 
 
-def _check_silence(st):
+def _check_silence(st, in_answer_mode: bool = False):
     """If the player has been quiet past the random threshold, append a
     silence-filler bubble to the chat history. Resets the threshold after
     firing so the next one is also random.
@@ -62,16 +150,27 @@ def _check_silence(st):
     silence threshold so the host nudges them more frequently. Use a
     pointed insistence line instead of generic silence reply.
 
-    NOTE: without autorefresh, this only fires when the user triggers
-    a rerun (e.g. sends a message). A truly idle player won't see a
-    silence prompt until they do something. Acceptable for V1.
+    in_answer_mode: True when called from the answering phase. Forwarded
+    to llm_silence_reply so the prompt instructs the host to behave for bb
+    mode (no letter offers, urgent tone). Tier-2 teasing only applies in
+    playing mode — once you've pressed bb, the answer-mode timer's the
+    nudge.
+
+    NOTE: idle players in playing mode only see silence fillers when they
+    do something (no autorefresh). In answering mode the 1-s autorefresh
+    keeps it ticking. Acceptable for V1.
     """
     state = st.session_state.game_state
     last_input = st.session_state.get("last_input_at", time.time())
     threshold = st.session_state.get("silence_threshold")
 
-    # Tier-2: pointed, frequent reminders
-    in_tier_2 = state.almost_had_it and state.almost_reminded_count >= 2
+    # Tier-2: pointed, frequent reminders. Only in playing mode — once
+    # the player presses bb, the round timer is the nag, not us.
+    in_tier_2 = (
+        not in_answer_mode
+        and state.almost_had_it
+        and state.almost_reminded_count >= 2
+    )
 
     if threshold is None:
         if in_tier_2:
@@ -87,9 +186,9 @@ def _check_silence(st):
             state.almost_reminded_count += 1
         else:
             line = host.llm_silence_reply(
-                st.session_state.llm, state, round_ctx, in_answer_mode=False
+                st.session_state.llm, state, round_ctx, in_answer_mode=in_answer_mode
             )
-        st.session_state.chat_log.append(("assistant", line))
+        _say(st, "assistant", line)
         # Reset silence baseline so we don't fire again immediately
         st.session_state.last_input_at = time.time()
         if in_tier_2:
@@ -176,6 +275,9 @@ def _start_round(st, round_idx: int):
     state.reset_almost_memory()
     state.reset_nonsense_counters()
     state.reset_input_counts()
+    # NOTE: don't clear score_pop here — the celebration line that
+    # triggers it has a future reveal_at that crosses round boundaries.
+    # _consume_score_pop self-clears via the `consumed` flag.
 
     st.session_state.round_idx = round_idx
     st.session_state.round_ctx = {
@@ -193,8 +295,11 @@ def _start_round(st, round_idx: int):
     # Info chips revealed during this round; cleared when round changes.
     st.session_state.revealed_info = {}
 
-    # Pre-round flavor lines from the host
-    chat_log = st.session_state.chat_log
+    # Pre-round flavor lines from the host — staggered so the player can
+    # actually read each one. The "system" clue line at the end appears
+    # AFTER the host's intro lines (it's the cue that the round is ready
+    # for input). The player can submit input at any time; staggering is
+    # purely visual.
     pre_msgs = list(pre_info_messages(
         round_idx + 1, state.total_score, round_idx,
         st.session_state.function_list,
@@ -202,7 +307,7 @@ def _start_round(st, round_idx: int):
         st.session_state.origin_list,
     ))
     for msg, _sleep in pre_msgs:
-        chat_log.append(("assistant", msg))
+        _say(st, "assistant", msg)
 
     # Mirror anything pre_info_messages revealed into the chip row.
     # We scan the messages because pre_info_messages decides probabilistically
@@ -218,7 +323,8 @@ def _start_round(st, round_idx: int):
     if origin and origin != "None" and origin.lower() in pre_text:
         st.session_state.revealed_info["origin"] = origin
 
-    chat_log.append(("system", f"📝 İPUCU: {definition}"))
+    # Clue line appears after the host intro, slightly delayed.
+    _say(st, "system", f"📝 İPUCU: {definition}", after=CHAT_STAGGER_HOST)
 
 
 # --------------------------------------------------------------------------
@@ -226,8 +332,15 @@ def _start_round(st, round_idx: int):
 # --------------------------------------------------------------------------
 
 
-def _handle_input(st, line: str, user_already_logged: bool = False):
-    """Process one player message during the hint phase.
+def _handle_input(st, line: str, user_already_logged: bool = False,
+                  in_answer_mode: bool = False):
+    """Process one player message.
+
+    in_answer_mode:
+      False (playing) — typing the answer triggers a tease, 'bb' enters
+        answering phase, letter requests work, ipucu/synonym/origin work.
+      True  (answering) — typing the answer wins the round, 'bb' resets the
+        45-s deadline, letter requests are blocked, everything else works.
 
     user_already_logged=True means the caller has already appended the user's
     bubble to chat_log (used by the two-step input pattern).
@@ -237,68 +350,133 @@ def _handle_input(st, line: str, user_already_logged: bool = False):
     round_idx = st.session_state.round_idx
     round_ctx = st.session_state.round_ctx
     word = round_ctx["word"]
-    chat_log = st.session_state.chat_log
 
     if not user_already_logged:
-        chat_log.append(("user", line))
+        _say(st, "user", line)
     raw = line.lower().strip()
     branch_taken = "unknown"
+    llm_ms = 0.0
     tkn = nltk.word_tokenize(raw)
     st.session_state.last_input_at = time.time()
     st.session_state.silence_threshold = random.uniform(
         SILENCE_MIN_SECONDS, SILENCE_MAX_SECONDS
     )
 
-    # === Branch: tries to answer without pressing bb ===
+    # === Branch: types the answer ===
     if raw == word.lower() or word in tkn:
-        branch_taken = "answer-without-bb"
-        chat_log.append(("assistant", random.choice([
-            f"{word} sığıyor mu oraya?",
-            "Bana mı soruyorsunuz, cevap mı veriyorsunuz?..",
-            "Haydi, şöyle bir cesaret... ",
-            "Efendim bana sormayın... Ben bir şey diyemem ki...",
-            "Ben bilmem...",
-            "... emin misiniz..?",
-            "Risk alacak mısınız..?",
-            "Buton... Buton..., Unutuyorsunuz basmayı ya da risk almak mı istemiyorsunuz..?",
-            "Şu \"bb\" tuşunu unutmayın efendim.",
-        ])))
-        # Remember it for later teasing reminders
-        state.almost_had_it = True
+        if in_answer_mode:
+            # Correct! End the round — celebration + score + advance.
+            branch_taken = "answer-correct"
+            # Stash the points we'll award so the renderer can play a
+            # +N pop animation when the celebration line is revealed.
+            round_score = score_for_correct_answer(word, state.revealed_letters)
+            st.session_state.score_pop = {
+                "delta": round_score,
+                "from": state.total_score,
+                "to": state.total_score + round_score,
+                "at": st.session_state.get("_next_reveal_at") or time.time(),
+            }
+            # Honor the legacy chosen_phrase callback: if the host's last
+            # tease was one of the two specific lines, the response shifts.
+            if state.chosen_phrase == "Bana mı soruyorsunuz, cevap mı veriyorsunuz?..":
+                _say(st, "assistant", random.choice([
+                    "Cevap veriyorlar..!",
+                    "Sanırım cevap veriyorsunuz ve doğru olanı yapıyorsunuz",
+                ]))
+            elif state.chosen_phrase == f"{word} sığıyor mu oraya?":
+                _say(st, "assistant", "Eyvah, eyvah! Efendim sığıyor mu ki?...")
+                _say(st, "assistant",
+                    "Tabii ki sığıyor! Yalnızca biraz heyecanlandırmak istedim "
+                    "ancak buna kanmadılar kendileri...")
+
+            _say(st, "assistant", correct_answer_celebration(word, round_score))
+            state.total_score += round_score
+            # Update the score-pop's "at" so the animation triggers when
+            # the celebration line reveals (cursor advanced after the
+            # _say above).
+            st.session_state.score_pop["at"] = (
+                st.session_state.get("_next_reveal_at") or time.time()
+            )
+            _end_answering_round(st, success=True)
+            return
+        else:
+            branch_taken = "answer-without-bb"
+            chosen = random.choice([
+                f"{word} sığıyor mu oraya?",
+                "Bana mı soruyorsunuz, cevap mı veriyorsunuz?..",
+                "Haydi, şöyle bir cesaret... ",
+                "Efendim bana sormayın... Ben bir şey diyemem ki...",
+                "Ben bilmem...",
+                "... emin misiniz..?",
+                "Risk alacak mısınız..?",
+                "Buton... Buton..., Unutuyorsunuz basmayı ya da risk almak mı istemiyorsunuz..?",
+                "Şu \"bb\" tuşunu unutmayın efendim.",
+            ])
+            state.chosen_phrase = chosen
+            _say(st, "assistant", chosen)
+            # Remember it for later teasing reminders
+            state.almost_had_it = True
 
     # === Branch: asks about origin ===
     elif any(it in ["kök", "köken", "kökenli", "kökeni"] for it in tkn):
         branch_taken = "origin"
         origin = st.session_state.origin_list[round_idx]
         if origin != "None":
-            chat_log.append(("assistant", random.choice([
+            _say(st, "assistant", random.choice([
                 f"Sanırım {origin} olmalı",
                 f"Hmm... Bu, sanıyorum {origin}",
                 f"{origin}",
                 f"{origin} olma ihtimali yüksek",
-            ])))
+            ]))
             st.session_state.revealed_info["origin"] = origin
         else:
-            chat_log.append(("assistant", "Maalesef kökeninden emin değilim..."))
+            _say(st, "assistant", "Maalesef kökeninden emin değilim...")
             st.session_state.revealed_info["origin"] = "Bilinmiyor"
 
-    # === Branch: bb (placeholder for step 4b) ===
+    # === Branch: bb ===
     elif raw == "bb":
-        branch_taken = "bb-placeholder"
-        chat_log.append(("assistant",
-            "Cevap fazı henüz hazır değil — Phase 4 step 4b'de gelecek. "
-            "Şimdilik tahmininizi doğrudan yazabilirsiniz."))
+        if in_answer_mode:
+            # Already in answer mode — bb is a no-op (matches legacy CLI:
+            # the deadline is set ONCE on entry, re-pressing bb doesn't
+            # extend it). Just acknowledge briefly.
+            branch_taken = "bb-noop"
+            _say(st, "assistant", random.choice([
+                "Düğmedeyiz zaten efendim, cevabınızı söyleyin...",
+                "Bastınız bile, hadi bakalım — kelime nedir?",
+                "Cevap modundayız efendim, dinliyorum...",
+            ]))
+        else:
+            branch_taken = "bb-enter"
+            _begin_answering(st)
+            _say(st, "assistant", random.choice([
+                "Süreyi durdurdum efendim, 45 saniyeniz var...",
+                "Pekâlâ, dinliyorum. Cevabınızı söyleyin...",
+                "Süre sizde — hadi bakalım, kelime nedir?",
+                "Düğmeye bastınız, şimdi cevap zamanı...",
+            ]))
 
     # === Branch: letter request ===
     elif raw == "h" or ("harf" in tkn and ("alabilir" in tkn or "alayım" in tkn)) or "harf" in tkn:
-        branch_taken = "letter-request"
-        _, status = letter_request(word, state.revealed_letters)
-        if status == "all-revealed":
-            chat_log.append(("assistant",
-                "Üzgünüm efendim, tüm harfleri açtınız. Bu sorudan puan alamadınız!\n"
-                "Sıradaki soruya geçelim..."))
-            _advance_to_next_round(st)
-            return
+        if in_answer_mode:
+            # Letter requests blocked once you've pressed bb (legacy line).
+            branch_taken = "letter-blocked"
+            _say(st, "assistant",
+                "Efendim, harf alamazsınız artık, süreyi durdurdunuz.")
+        else:
+            branch_taken = "letter-request"
+            _, status = letter_request(word, state.revealed_letters)
+            # End the round when the LAST blank gets revealed (matches
+            # legacy: it reveals the letter, then checks if any blanks
+            # remain). status=="all-revealed" only fires when called with
+            # zero blanks left, i.e. one click late — so also check the
+            # post-reveal state here.
+            no_blanks_left = "_  " not in state.revealed_letters
+            if status == "all-revealed" or no_blanks_left:
+                _say(st, "assistant",
+                    "Üzgünüm efendim, tüm harfleri açtınız. Bu sorudan puan alamadınız!\n"
+                    "Sıradaki soruya geçelim...")
+                _advance_to_next_round(st)
+                return
 
     # === Branch: explicit hint request ===
     elif any(it in STUCK_KEYWORDS for it in tkn):
@@ -312,7 +490,7 @@ def _handle_input(st, line: str, user_already_logged: bool = False):
             st.session_state.synonym_list,
         )
         for msg in msgs:
-            chat_log.append(("assistant", msg))
+            _say(st, "assistant", msg, after=CHAT_STAGGER_HINT)
         # If the dispatcher chose to reveal the compound form, surface it
         compound = st.session_state.compound_list[round_idx]
         if compound and compound != "None":
@@ -326,14 +504,14 @@ def _handle_input(st, line: str, user_already_logged: bool = False):
         branch_taken = "synonym-request"
         syn_phrase = get_synonym_phrase(st.session_state.synonym_list, round_idx)
         if syn_phrase != "None":
-            chat_log.append(("assistant", syn_phrase))
+            _say(st, "assistant", syn_phrase)
         else:
-            chat_log.append(("assistant", "Maalesef aklıma bir şey gelmedi şu an..."))
+            _say(st, "assistant", "Maalesef aklıma bir şey gelmedi şu an...")
 
     # === Branch: between-rounds keyword while in a round ===
     elif raw == "puan":
         branch_taken = "score-check"
-        chat_log.append(("assistant", f"Şu anki toplam puanınız: {state.total_score}"))
+        _say(st, "assistant", f"Şu anki toplam puanınız: {state.total_score}")
 
     # === Default: try react_to_guess, fall through to LLM if chatter ===
     else:
@@ -344,17 +522,17 @@ def _handle_input(st, line: str, user_already_logged: bool = False):
         )
         if reaction is not None:
             branch_taken = "guess-reaction"
-            chat_log.append(("assistant", reaction))
+            _say(st, "assistant", reaction)
         else:
             branch_taken = "llm-fallback"
             state.round_history.append(("user", line))
             t_llm = time.perf_counter()
             reply = host.llm_host_reply(
                 st.session_state.llm, state, round_ctx, line,
-                state.round_history, in_answer_mode=False,
+                state.round_history, in_answer_mode=in_answer_mode,
             )
             llm_ms = (time.perf_counter() - t_llm) * 1000
-            chat_log.append(("assistant", reply))
+            _say(st, "assistant", reply)
             state.round_history.append(("assistant", reply))
 
     st.session_state.list_active_input.append(raw)
@@ -370,23 +548,33 @@ def _handle_input(st, line: str, user_already_logged: bool = False):
     # 5+ same input → append a meme line on top (the player is clearly stuck).
     repeat_count = state.input_counts.get(raw, 0)
     if repeat_count >= 5 and random.random() < 0.7:
-        chat_log.append(("assistant", nonsense_meme()))
+        _say(st, "assistant", nonsense_meme(), after=CHAT_STAGGER_SHORT)
     elif repeat_count >= 3 and branch_taken in ("guess-reaction", "llm-fallback"):
-        chat_log.append(("assistant", repetition_nudge()))
+        _say(st, "assistant", repetition_nudge(), after=CHAT_STAGGER_SHORT)
 
     # === "Az önce çıktı sanki ağzınızdan..." teasing ===
     # Fires after stuck-requests or wrong-guesses when the player has
-    # already typed the answer earlier without pressing bb.
+    # already typed the answer earlier — both before AND after pressing
+    # bb. The host should remember the player typed the answer in the
+    # hint phase and remind them when they ask for help in answer mode.
     # No hard cap on count: tier escalation (gentle → insistent) handles
-    # not-becoming-nagging. Probability rises with reminded_count so the
-    # host gets more persistent the longer the player ignores the answer.
+    # not-becoming-nagging. Probability rises with reminded_count.
     REMINDER_BRANCHES = {"hint-request", "guess-reaction", "llm-fallback"}
     if state.almost_had_it and branch_taken in REMINDER_BRANCHES:
-        # 50% chance for first 2 reminders, then 80% chance once we've
-        # escalated to tier-2 insistence.
-        prob = 0.5 if state.almost_reminded_count < 2 else 0.8
+        # First reminder always fires — the player typed the answer and
+        # the host should acknowledge that immediately the next time
+        # they ask for help, especially right after pressing bb.
+        # After the first one, 50% chance for the next, then 80% once
+        # we've escalated to tier-2 insistence.
+        if state.almost_reminded_count == 0:
+            prob = 1.0
+        elif state.almost_reminded_count < 2:
+            prob = 0.5
+        else:
+            prob = 0.8
         if random.random() < prob:
-            chat_log.append(("assistant", almost_had_it_reminder(state.almost_reminded_count)))
+            _say(st, "assistant", almost_had_it_reminder(state.almost_reminded_count),
+                 after=CHAT_STAGGER_SHORT)
             state.almost_reminded_count += 1
 
     # === Nonsense / meme reply ===
@@ -404,7 +592,7 @@ def _handle_input(st, line: str, user_already_logged: bool = False):
         if state.nonsense_total >= 4:
             prob = max(prob, 0.6)
         if prob > 0 and random.random() < prob:
-            chat_log.append(("assistant", nonsense_meme()))
+            _say(st, "assistant", nonsense_meme(), after=CHAT_STAGGER_SHORT)
     elif branch_taken in nonsense_branches:
         # Real attempt — reset the consecutive counter
         state.nonsense_streak = 0
@@ -417,11 +605,99 @@ def _handle_input(st, line: str, user_already_logged: bool = False):
 
 def _advance_to_next_round(st):
     """Move to the next round, or end the game if we're at the last."""
+    # Clear any leftover answering state from the round we're leaving.
+    st.session_state.answer_deadline = None
+    st.session_state.answer_started_at = None
     next_idx = st.session_state.round_idx + 1
     if next_idx >= TOTAL_ROUNDS:
         st.session_state.phase = "end"
     else:
         _start_round(st, next_idx)
+
+
+# --------------------------------------------------------------------------
+# bb / answering phase — global timer pauses, 45-s round timer starts
+# --------------------------------------------------------------------------
+
+
+def _begin_answering(st):
+    """Enter the answering phase: pause the global timer, snapshot it,
+    set the 45-s round deadline.
+
+    Matches legacy: deadline is set ONCE on bb entry. Re-pressing bb later
+    is a no-op (handled in _handle_input).
+
+    Server deadline is now + 46 s; the JS visual countdown ticks from 45.
+    The +1 grace second ensures the visible counter hits 0 a hair before
+    the authoritative server check fires timeout — no race where the user
+    sees "1" but the round has already ended.
+    """
+    state = st.session_state.game_state
+    now = time.time()
+    state.is_paused = True
+    state.resume_time = state.total_time
+    st.session_state.phase = "answering"
+    st.session_state.answer_started_at = now
+    st.session_state.answer_deadline = now + ROUND_TIME_SECONDS + 1
+    # Reset silence baseline so the host doesn't fire a filler immediately
+    # after the bb-enter line.
+    st.session_state.last_input_at = now
+    st.session_state.silence_threshold = random.uniform(
+        SILENCE_MIN_SECONDS, SILENCE_MAX_SECONDS
+    )
+
+
+def _end_answering_round(st, *, success: bool):
+    """Restore global timer and advance to the next round.
+
+    success=True  — player got the answer. Score already added by caller.
+    success=False — 45s elapsed. Caller already appended timeout lines and
+                    subtracted score.
+    """
+    state = st.session_state.game_state
+    # Restore the global timer to where it was when bb fired.
+    state.total_time = state.resume_time
+    state.is_paused = False
+    # Make sure the next rerun's _tick_global_timer doesn't subtract the
+    # whole pause duration — reset its baseline.
+    st.session_state.last_tick_at = time.time()
+    st.session_state.answer_deadline = None
+    st.session_state.answer_started_at = None
+    # If the global timer ran out *before* bb (shouldn't happen normally
+    # since we check at the top of render_arena), end the game.
+    if state.total_time <= 0:
+        state.game_over = True
+        st.session_state.phase = "end"
+        return
+    _advance_to_next_round(st)
+
+
+def _handle_answering_timeout(st):
+    """Fire when the 45-s deadline has passed without a correct answer.
+
+    Per the legacy CLI: the round score is computed from how much was
+    revealed at timeout and SUBTRACTED from total_score. Harsh on purpose —
+    pressing bb is a commitment.
+    """
+    state = st.session_state.game_state
+    word = st.session_state.round_ctx["word"]
+
+    round_score = score_for_correct_answer(word, state.revealed_letters)
+    state.total_score -= round_score
+    # Stash a negative score-pop so the renderer animates the loss.
+    st.session_state.score_pop = {
+        "delta": -round_score,
+        "from": state.total_score + round_score,
+        "to": state.total_score,
+        "at": st.session_state.get("_next_reveal_at") or time.time(),
+    }
+    for line in round_timeout_lines(word, round_score, state.total_score):
+        _say(st, "assistant", line)
+    # Trigger the score animation alongside the LAST timeout line.
+    st.session_state.score_pop["at"] = (
+        st.session_state.get("_next_reveal_at") or time.time()
+    )
+    _end_answering_round(st, success=False)
 
 
 # --------------------------------------------------------------------------
@@ -445,17 +721,22 @@ def render_arena(st):
     # where in the script we call it, so calling it first is purely a
     # data-flow choice — it lets us render tiles/clue with the POST-input
     # state when the input advances to the next round.
+    # Single shared key across both phases ("lexi_chat") so the input
+    # keeps focus when we transition playing ↔ answering.
     line = st.chat_input(
         "Tahmin yap, harf iste ('h'), ya da ipucu iste...",
-        key="arena_input",
+        key="lexi_chat",
     )
     if line:
         # Show a spinner during processing so even slow paths (LLM call)
         # feel intentional rather than frozen.
         with st.spinner("Sunucu düşünüyor..."):
             _handle_input(st, line)
-        # If _handle_input transitioned us to "end" (or another phase),
-        # bail and let the router pick up the new phase.
+        # If _handle_input transitioned us out of playing (bb → answering,
+        # or end), force one rerun so the new phase renders. Otherwise let
+        # the natural script-end finish — calling st.rerun() unconditionally
+        # races with the autorefresh component and can drop the user's
+        # bubble before it paints.
         if st.session_state.phase != "playing":
             st.rerun()
             return
@@ -480,6 +761,8 @@ def render_arena(st):
         total_rounds=TOTAL_ROUNDS,
         seconds_remaining=int(state.total_time),
         in_answer_mode=False,
+        live=True,  # JS animates the countdown between reruns
+        pop=_consume_score_pop(st),
     )
 
     # === Letter board ===
@@ -494,9 +777,26 @@ def render_arena(st):
     st.write("")
 
     # === Chat history (fixed-height, scrolls internally) ===
+    _render_chat(st)
+
+
+def _render_chat(st):
+    """Shared chat-history block used by both playing and answering.
+
+    Skips entries whose reveal_at is in the future — those reveal on a
+    later rerun (driven by the periodic autorefresh in main()).
+    """
     chat_log = st.session_state.chat_log
+    now = time.time()
     with st.container(height=320, border=False):
-        for role, text in chat_log:
+        for entry in chat_log:
+            # Tolerate legacy 2-tuples for safety; reveal them immediately.
+            if len(entry) == 2:
+                role, text = entry
+            else:
+                role, text, reveal_at = entry[0], entry[1], entry[2]
+                if reveal_at > now:
+                    continue
             if role == "system":
                 st.caption(text)
             elif role == "assistant":
@@ -505,3 +805,104 @@ def render_arena(st):
             else:
                 with st.chat_message("user"):
                     st.write(text)
+
+
+def render_answering(st):
+    """Answering phase: global timer paused, 45-s round timer ticking.
+
+    Server is authoritative — `answer_deadline` is the wall-clock when
+    timeout fires, recomputed on every rerun. A 1-s autorefresh keeps the
+    page reruning so timeout fires even if the player goes idle. The JS
+    ticker in `answer_timer` only animates the displayed digits between
+    reruns; truth always comes from the server.
+    """
+    state = st.session_state.game_state
+
+    # Defensive: if we somehow got here without a deadline set, fall back
+    # to playing phase. Shouldn't happen, but better than dividing by None.
+    deadline = st.session_state.get("answer_deadline")
+    if deadline is None:
+        st.session_state.phase = "playing"
+        st.rerun()
+        return
+
+    now = time.time()
+    seconds_remaining = deadline - now
+
+    # === Authoritative timeout check ===
+    if seconds_remaining <= 0:
+        _handle_answering_timeout(st)
+        st.rerun()
+        return
+
+    # === Process input BEFORE rendering (same pattern as render_arena) ===
+    # Same key as playing-phase input so focus carries across the bb
+    # transition. Streamlit treats it as the same widget instance.
+    line = st.chat_input(
+        "Cevabınızı söyleyin, ipucu isteyin... (harf alamazsınız)",
+        key="lexi_chat",
+    )
+    if line:
+        with st.spinner("Sunucu düşünüyor..."):
+            _handle_input(st, line, in_answer_mode=True)
+        # If the round ended (correct answer), force a rerun so the new
+        # phase renders. Otherwise let the natural script-end finish —
+        # calling st.rerun() in the steady state races with autorefresh
+        # and can drop the just-appended chat bubble.
+        if st.session_state.phase != "answering":
+            st.rerun()
+            return
+        # Recompute remaining time post-input (bb-reset moves the deadline).
+        deadline = st.session_state.get("answer_deadline")
+        seconds_remaining = deadline - time.time() if deadline else 0
+
+    # Silence check (in answer mode) — same anti-immediate-fire ordering.
+    _check_silence(st, in_answer_mode=True)
+
+    round_idx = st.session_state.round_idx
+    round_ctx = st.session_state.round_ctx
+    word = round_ctx["word"]
+
+    # === Header ===
+    wordmark(st, level="h3")
+    topbar(
+        st,
+        score=state.total_score,
+        round_num=round_idx + 1,
+        total_rounds=TOTAL_ROUNDS,
+        # Show the (paused) global timer alongside, dim — gives the player
+        # a sense of the game-wide budget they'll resume into.
+        seconds_remaining=int(state.total_time),
+        in_answer_mode=True,
+        pop=_consume_score_pop(st),
+    )
+
+    # === Big answer-phase timer pill (JS-animated) ===
+    # Floor the seconds for the JS start so we never display a number
+    # higher than what the server actually has. ROUND_TIME_SECONDS-1 caps
+    # the visible value at 45 even though the server gave us 46s.
+    visible_secs = min(ROUND_TIME_SECONDS, max(0, int(seconds_remaining)))
+    # round_key changes whenever a new bb session starts — used by the JS
+    # to drop stale countdown state from the previous round.
+    started_at = st.session_state.get("answer_started_at") or 0
+    round_key = f"{round_idx}-{int(started_at)}"
+    answer_timer(
+        st,
+        seconds_remaining=visible_secs,
+        total_seconds=ROUND_TIME_SECONDS,
+        round_key=round_key,
+    )
+
+    # === Letter board (frozen — no more letter requests during bb) ===
+    tile_board(st, word, state.revealed_letters)
+
+    # === Revealed-info chips ===
+    info_chips(st, st.session_state.get("revealed_info", {}))
+
+    # === Clue ===
+    clue_card(st, round_ctx["clue"])
+
+    st.write("")
+
+    # === Chat ===
+    _render_chat(st)

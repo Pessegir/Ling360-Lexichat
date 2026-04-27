@@ -6,9 +6,28 @@ has no Streamlit import-side-effect — easier to unit-test the HTML output.
 from __future__ import annotations
 
 import html as html_lib
+import time
+
+import streamlit.components.v1 as components
 
 from game.config import APP_NAME, APP_TAGLINE
 from game.text_utils import tr_upper
+
+
+def _inject_parent_js(script_body: str, *, height: int = 0):
+    """Run JS in the Streamlit parent document.
+
+    `st.markdown(unsafe_allow_html=True)` STRIPS <script> tags, so any
+    JS we want to run lives in a small components.html iframe whose
+    body reaches up to the parent document via window.parent.document.
+
+    height=0 keeps the iframe invisible.
+    """
+    components.html(
+        f'<script>(function(){{try{{var d=window.parent.document;{script_body}}}catch(e){{console.warn("lexi js error",e);}}}})();</script>',
+        height=height,
+        scrolling=False,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -124,11 +143,19 @@ def info_chips(st, revealed: dict):
 
 
 def topbar(st, *, score: int, round_num: int, total_rounds: int,
-           seconds_remaining: int, in_answer_mode: bool = False):
+           seconds_remaining: int, in_answer_mode: bool = False,
+           live: bool = False, pop: dict | None = None):
     """Render the score/round/timer header strip.
 
     in_answer_mode = True → label changes to "CEVAP SÜRESİ", color shifts amber.
     seconds_remaining < 30 → color shifts to dusty rose (warning).
+    live = True → attach a JS countdown so the visible timer ticks every
+                  second even without a Streamlit rerun (server stays
+                  authoritative — value is reconciled on the next rerun).
+    pop  = {"delta": int} → render a floating +N / -N badge that
+                  auto-fades. Driver decides whether the pop is "due"
+                  (e.g. its `at` timestamp ≤ now); we just paint when
+                  it's passed in.
     """
     mins, secs = divmod(max(0, seconds_remaining), 60)
     timer_str = f"{mins:02d}:{secs:02d}"
@@ -142,12 +169,27 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
         timer_class = ""
         timer_label = "KALAN SÜRE"
 
+    # Score-pop badge: rendered next to the score value, CSS animation
+    # handles the float+fade. The `key=` trick (data-pop-id) forces a
+    # fresh DOM node per pop so the @keyframes restart cleanly.
+    pop_html = ""
+    if pop:
+        delta = int(pop.get("delta", 0))
+        if delta != 0:
+            sign = "+" if delta > 0 else ""
+            cls = "gain" if delta > 0 else "loss"
+            pop_id = pop.get("id", str(int(time.time() * 1000)))
+            pop_html = (
+                f'<span class="lexi-score-pop {cls}" '
+                f'data-pop-id="{pop_id}">{sign}{delta:,}</span>'
+            )
+
     st.markdown(
         f'''
 <div class="lexi-topbar">
   <div class="lexi-chip">
     <div class="lexi-chip-label">PUAN</div>
-    <div class="lexi-chip-value">{score:,}</div>
+    <div class="lexi-chip-value">{score:,}{pop_html}</div>
   </div>
   <div class="lexi-chip">
     <div class="lexi-chip-label">SORU</div>
@@ -155,12 +197,117 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
   </div>
   <div class="lexi-chip" style="align-items: flex-end;">
     <div class="lexi-chip-label">{timer_label}</div>
-    <div class="lexi-chip-value {timer_class}">{timer_str}</div>
+    <div class="lexi-chip-value {timer_class}" id="lexi-global-timer">{timer_str}</div>
   </div>
 </div>
 ''',
         unsafe_allow_html=True,
     )
+
+    # JS state is stored on window.parent so it survives the per-rerun
+    # iframe recreation. The element it paints into (#lexi-global-timer)
+    # lives in the parent document — we look it up via window.parent.document.
+    if not live:
+        # Stop any running countdown; we're showing a static value
+        # (paused timer during answering). Otherwise the prior interval
+        # would keep ticking and overwrite the static digits.
+        _inject_parent_js(
+            'var w=window.parent;'
+            'if(w.__lexiGlobalTimer){clearInterval(w.__lexiGlobalTimer);w.__lexiGlobalTimer=null;}'
+            'w.__lexiGlobalJsSecs=null;'
+        )
+    else:
+        server_secs = max(0, int(seconds_remaining))
+        js = (
+            'var w=window.parent;'
+            f'var serverSecs={server_secs};'
+            'var jsSecs=(typeof w.__lexiGlobalJsSecs==="number")?w.__lexiGlobalJsSecs:serverSecs;'
+            # Normally server <= js (wall clock advanced between reruns).
+            # But if the gap is large (>5s), trust the server — pause/restore.
+            'var remaining=(Math.abs(serverSecs-jsSecs)>5)?serverSecs:Math.min(serverSecs,jsSecs);'
+            'w.__lexiGlobalJsSecs=remaining;'
+            'function paint(){'
+              'var node=d.getElementById("lexi-global-timer");'
+              'if(!node)return false;'
+              'var m=Math.floor(remaining/60),s=remaining%60;'
+              'node.textContent=(m<10?"0":"")+m+":"+(s<10?"0":"")+s;'
+              'return true;'
+            '}'
+            'paint();'
+            'if(w.__lexiGlobalTimer){clearInterval(w.__lexiGlobalTimer);w.__lexiGlobalTimer=null;}'
+            'w.__lexiGlobalTimer=setInterval(function(){'
+              'remaining=Math.max(0,remaining-1);'
+              'w.__lexiGlobalJsSecs=remaining;'
+              'if(!paint()||remaining<=0){clearInterval(w.__lexiGlobalTimer);w.__lexiGlobalTimer=null;}'
+            '},1000);'
+        )
+        _inject_parent_js(js)
+
+
+# --------------------------------------------------------------------------
+# Answer-phase timer — server-authoritative + JS visual countdown
+# --------------------------------------------------------------------------
+
+
+def answer_timer(st, *, seconds_remaining: float, total_seconds: int = 45,
+                 round_key: str = ""):
+    """Render the bb-phase countdown.
+
+    The server is authoritative — `seconds_remaining` is the truth at render
+    time, recomputed from wall clock on every rerun. The JS `setInterval`
+    only animates the *visible* digits between reruns so the user sees a
+    smooth tick instead of a frozen number.
+
+    The JS counter starts from ceil(seconds_remaining) and counts down to 0,
+    so when the server-side rerun reconciles, the visual already matches
+    (the +1 grace second is added on the server side: deadline = now + 46
+    while we still display 45). The displayed number is clamped to >= 0;
+    real round-end is decided server-side, not by the JS.
+    """
+    secs = max(0, int(seconds_remaining))
+    # HTML lives in the parent document via st.markdown. The JS that
+    # paints/ticks runs through _inject_parent_js (st.markdown strips
+    # <script> tags, so we have to use a components.html iframe).
+    st.markdown(
+        f'''
+<div class="lexi-answer-timer" data-total="{total_seconds}">
+  <div class="lexi-answer-timer-label">CEVAP SÜRESİ</div>
+  <div class="lexi-answer-timer-value" id="lexi-answer-timer-value">{secs:02d}</div>
+  <div class="lexi-answer-timer-bar">
+    <div class="lexi-answer-timer-fill" id="lexi-answer-timer-fill"
+         style="width: {min(100, max(0, (secs / max(1, total_seconds)) * 100)):.1f}%"></div>
+  </div>
+</div>
+''',
+        unsafe_allow_html=True,
+    )
+    js = (
+        'var w=window.parent;'
+        f'var serverSecs={secs};'
+        f'var total={total_seconds};'
+        f'var roundKey="{round_key}";'
+        # New bb session → drop any stale JS countdown state.
+        'if(w.__lexiAnswerRoundKey!==roundKey){w.__lexiAnswerRoundKey=roundKey;w.__lexiAnswerJsSecs=serverSecs;}'
+        'var jsSecs=(typeof w.__lexiAnswerJsSecs==="number")?w.__lexiAnswerJsSecs:serverSecs;'
+        'var remaining=Math.min(serverSecs,jsSecs);'
+        'w.__lexiAnswerJsSecs=remaining;'
+        'function paint(){'
+          'var elNow=d.getElementById("lexi-answer-timer-value");'
+          'var fillNow=d.getElementById("lexi-answer-timer-fill");'
+          'if(!elNow||!fillNow)return false;'
+          'elNow.textContent=(remaining<10?"0":"")+remaining;'
+          'fillNow.style.width=Math.min(100,Math.max(0,(remaining/total)*100))+"%";'
+          'return true;'
+        '}'
+        'paint();'
+        'if(w.__lexiAnswerTimer){clearInterval(w.__lexiAnswerTimer);w.__lexiAnswerTimer=null;}'
+        'w.__lexiAnswerTimer=setInterval(function(){'
+          'remaining=Math.max(0,remaining-1);'
+          'w.__lexiAnswerJsSecs=remaining;'
+          'if(!paint()||remaining<=0){clearInterval(w.__lexiAnswerTimer);w.__lexiAnswerTimer=null;}'
+        '},1000);'
+    )
+    _inject_parent_js(js)
 
 
 # --------------------------------------------------------------------------

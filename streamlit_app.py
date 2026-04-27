@@ -23,7 +23,7 @@ from game.session import build_new_game, load_static_resources
 from game.state import GameState
 from llm_client import LLMError, GeminiClient
 from ui import theme
-from ui.arena import render_arena
+from ui.arena import render_arena, render_answering
 from ui.components import host_bubble, wordmark
 
 
@@ -46,7 +46,7 @@ theme.inject(st)
 # --------------------------------------------------------------------------
 
 DEFAULTS = {
-    "phase": "home",          # home / loading / playing / answering / between / end / history
+    "phase": "home",          # home / loading / playing / answering / end / history
     "player_name": "",
     "player_address": "bey",  # hanım / bey
     "api_key": "",
@@ -73,6 +73,10 @@ DEFAULTS = {
     "silence_threshold": None,
     "last_tick_at": None,
     "revealed_info": {},
+    "answer_deadline": None,  # wall-clock when bb 45-s timer expires
+    "answer_started_at": None,  # wall-clock when current bb session started
+    "_next_reveal_at": None,  # cursor for staggered chat reveal (see _say)
+    "score_pop": None,  # transient score-animation payload
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -276,15 +280,17 @@ def render_loading():
     st.session_state.example_sentences = payload["example_sentences"]
     st.session_state.corpus = resources["corpus"]
     st.session_state.chat_log = []
+    st.session_state._next_reveal_at = None
 
-    # Initial host greeting
-    st.session_state.chat_log.append((
+    # Initial host greeting (staggered via _say)
+    from ui.arena import _say, _start_round
+    _say(
+        st,
         "assistant",
         f"Merhaba {full_username}, hoşgeldiniz! İlk soruyla başlıyoruz...",
-    ))
+    )
 
     # Initialize round 0 — done via arena helper
-    from ui.arena import _start_round
     _start_round(st, 0)
 
     st.session_state.phase = "playing"
@@ -343,6 +349,7 @@ PHASE_RENDERERS = {
     "home": render_home,
     "loading": render_loading,
     "playing": lambda: render_arena(st),
+    "answering": lambda: render_answering(st),
     "end": render_end_placeholder,
     "history": render_history,
 }
@@ -351,12 +358,26 @@ PHASE_RENDERERS = {
 def main():
     render_sidebar()
 
-    # No autorefresh: each interaction triggers a single Streamlit rerun.
-    # The visible timer updates whenever the user takes an action; in
-    # between, it appears frozen but the underlying math remains correct
-    # (computed from wall clock on every rerun). We can add a JS-side
-    # ticker later that animates the displayed time without forcing a
-    # Python rerun.
+    # Autorefresh policy:
+    # - "answering" phase always autorefreshes (3 s) so the 45-s server
+    #   deadline fires even if the player goes idle. The JS countdown in
+    #   the timer pill ticks every second between reruns.
+    # - "playing" phase autorefreshes (700 ms) ONLY when the chat queue
+    #   has pending future-reveal messages — i.e. right after a hint or
+    #   round transition, so each line appears one-by-one. Otherwise
+    #   playing runs refresh-free to keep the page snappy.
+    #
+    # Interval choices: 3 s in answering avoids racing the user's
+    # submission. 700 ms during chat reveal feels close to natural
+    # speech pacing without being aggressive.
+    phase = st.session_state.phase
+    if st_autorefresh is not None:
+        if phase == "answering":
+            st_autorefresh(interval=3000, key="answer_phase_tick")
+        elif phase == "playing":
+            from ui.arena import _has_pending_chat
+            if _has_pending_chat(st):
+                st_autorefresh(interval=700, key="chat_reveal_tick")
 
     renderer = PHASE_RENDERERS.get(st.session_state.phase, render_home)
     renderer()

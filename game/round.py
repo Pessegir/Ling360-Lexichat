@@ -301,10 +301,24 @@ def pre_info_messages(question_number, total_score, round_idx,
 
 
 def score_for_correct_answer(word, revealed_letters):
-    """Points awarded when player answers correctly: (unrevealed letters + 1) * 100."""
-    # +1 because an unanswered word with no letters revealed = full points
+    """Points awarded for a correct answer: 100 per UNREVEALED letter.
+
+    Mathematically equivalent to the legacy formula
+        (LetterRequest(word).count("_  ") + 1) * 100
+    where LetterRequest reveals one extra letter as a side effect, then
+    counts blanks, then adds 1. The side-effect-reveal subtracts one
+    blank; the +1 adds it back. Net: blank_count * 100 (using the
+    pre-call value).
+
+    Examples (word "enik", 4 letters):
+      - 0 letters revealed → 4 blanks → 400 pts
+      - 1 letter revealed  → 3 blanks → 300 pts
+      - 3 letters revealed → 1 blank  → 100 pts
+    """
+    if not revealed_letters:
+        return len(word) * 100
     blank_count = revealed_letters.count("_  ")
-    return (blank_count + 1) * 100 if revealed_letters else len(word) * 100
+    return blank_count * 100
 
 
 def correct_answer_celebration(word, round_score):
