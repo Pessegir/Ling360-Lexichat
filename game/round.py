@@ -382,6 +382,7 @@ def almost_had_it_reminder(reminded_count: int = 0):
 # game keyword, not a conversational ack). Kept rare on purpose — the
 # comedy is in the surprise.
 _NONSENSE_MEMES = [
+    "Cemil olabilir mi?",
     "Ne dersiniz, Cemil olabilir mi?",
     "Belki Yıldız Tilbe'den bir şarkı arıyorsunuzdur..?",
     "Hmm, klavyenize bir şey mi düştü efendim?",

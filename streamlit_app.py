@@ -17,13 +17,14 @@ try:
 except ImportError:
     st_autorefresh = None
 
+from game import host
 from game.config import APP_NAME, APP_TAGLINE, TOTAL_GAME_TIME, TOTAL_ROUNDS
 from game.round import end_game_lines
 from game.session import build_new_game, load_static_resources
 from game.state import GameState
 from llm_client import LLMError, GeminiClient
 from ui import theme
-from ui.arena import render_arena, render_answering
+from ui.arena import render_arena, render_answering, render_between, render_prologue
 from ui.components import host_bubble, wordmark
 
 
@@ -46,7 +47,7 @@ theme.inject(st)
 # --------------------------------------------------------------------------
 
 DEFAULTS = {
-    "phase": "home",          # home / loading / playing / answering / end / history
+    "phase": "home",          # home / loading / prologue / playing / answering / between / end / history
     "player_name": "",
     "player_address": "bey",  # hanım / bey
     "api_key": "",
@@ -77,6 +78,13 @@ DEFAULTS = {
     "answer_started_at": None,  # wall-clock when current bb session started
     "_next_reveal_at": None,  # cursor for staggered chat reveal (see _say)
     "score_pop": None,  # transient score-animation payload
+    # Prologue (pre-round small talk). messages = LLM chat history;
+    # the chat_log is what the player SEES (UI), messages is what we
+    # send back to the LLM each turn.
+    "prologue_messages": None,
+    # Between-rounds transition state. Set when a round ends; cleared
+    # when the next round starts. See ui/arena._advance_to_next_round.
+    "between_state": None,
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -282,18 +290,29 @@ def render_loading():
     st.session_state.chat_log = []
     st.session_state._next_reveal_at = None
 
-    # Initial host greeting (staggered via _say)
-    from ui.arena import _say, _start_round
+    # Open the prologue: greeting + LLM (or scripted) opener.
+    from ui.arena import _say
     _say(
         st,
         "assistant",
-        f"Merhaba {full_username}, hoşgeldiniz! İlk soruyla başlıyoruz...",
+        f"Merhaba {full_username}, {APP_NAME}'e hoşgeldiniz!",
     )
+    # Seed the LLM chat history with the player's implicit "Merhaba"
+    # so the first prologue_reply has something to react to.
+    prologue_messages = [{"role": "user", "content": "Merhaba"}]
+    try:
+        opener = host.prologue_reply(llm, prologue_messages)
+    except Exception:
+        opener = "Çok sevindim efendim, bugün biraz Türkçe ile haşır neşir olalım."
+    _say(st, "assistant", opener)
+    prologue_messages.append({"role": "assistant", "content": opener})
+    _say(
+        st, "system",
+        "Hazır olduğunuzda 'hazırım' yazın — oyun otomatik başlayacak.",
+    )
+    st.session_state.prologue_messages = prologue_messages
 
-    # Initialize round 0 — done via arena helper
-    _start_round(st, 0)
-
-    st.session_state.phase = "playing"
+    st.session_state.phase = "prologue"
     st.rerun()
 
 
@@ -348,8 +367,10 @@ def render_end_placeholder():
 PHASE_RENDERERS = {
     "home": render_home,
     "loading": render_loading,
+    "prologue": lambda: render_prologue(st),
     "playing": lambda: render_arena(st),
     "answering": lambda: render_answering(st),
+    "between": lambda: render_between(st),
     "end": render_end_placeholder,
     "history": render_history,
 }
@@ -358,26 +379,30 @@ PHASE_RENDERERS = {
 def main():
     render_sidebar()
 
-    # Autorefresh policy:
-    # - "answering" phase always autorefreshes (3 s) so the 45-s server
-    #   deadline fires even if the player goes idle. The JS countdown in
-    #   the timer pill ticks every second between reruns.
-    # - "playing" phase autorefreshes (700 ms) ONLY when the chat queue
-    #   has pending future-reveal messages — i.e. right after a hint or
-    #   round transition, so each line appears one-by-one. Otherwise
-    #   playing runs refresh-free to keep the page snappy.
-    #
-    # Interval choices: 3 s in answering avoids racing the user's
-    # submission. 700 ms during chat reveal feels close to natural
-    # speech pacing without being aggressive.
-    phase = st.session_state.phase
+    # Autorefresh is enabled ONLY during the answering phase (3 s) so the
+    # 45-s server deadline fires even if the player goes idle. Playing
+    # phase has NO autorefresh — the previous "chat reveal" autorefresh
+    # at 700 ms raced st.chat_input submissions and made the game feel
+    # broken ("can type but can't send"). Staggered chat reveals are
+    # instead handled by reveal-on-next-rerun, which is good enough
+    # since the player is naturally interacting; pure-idle reveal can
+    # come back later if we drive it from JS instead of autorefresh.
     if st_autorefresh is not None:
+        phase = st.session_state.phase
         if phase == "answering":
+            # 3 s avoids racing st.chat_input submissions while still
+            # firing the 45-s server timeout.
             st_autorefresh(interval=3000, key="answer_phase_tick")
-        elif phase == "playing":
-            from ui.arena import _has_pending_chat
-            if _has_pending_chat(st):
-                st_autorefresh(interval=700, key="chat_reveal_tick")
+        elif phase == "between":
+            # Auto-advance + idle-nudge timing both need ticks. We use
+            # 1.5 s here as a compromise: tight enough that the 2-4 s
+            # auto-advance feels prompt, loose enough that an in-flight
+            # st.chat_input submission (e.g. user typing 'devam') isn't
+            # raced and dropped. Submissions are processed BEFORE the
+            # auto-advance check in render_between, so even if the
+            # deadline has passed by the time we paint, a typed 'devam'
+            # wins and we continue cleanly into the next round.
+            st_autorefresh(interval=1500, key="between_phase_tick")
 
     renderer = PHASE_RENDERERS.get(st.session_state.phase, render_home)
     renderer()

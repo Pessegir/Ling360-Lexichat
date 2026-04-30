@@ -65,34 +65,20 @@ CHAT_STAGGER_SHORT = 0.8  # snappy for one-word reactions (e.g. nonsense memes)
 def _say(st, role: str, text: str, *, after: float | None = None):
     """Append a chat bubble with a reveal-time stamp.
 
-    after=None    → host messages stagger CHAT_STAGGER_HOST behind the
-                    previous queued message; user/system reveal immediately.
-    after=0       → reveal immediately (overrides stagger).
-    after=<float> → wait that many seconds after the previous queued msg.
+    Currently `after` is accepted for source-level intent but ignored —
+    every message reveals immediately. Staggering is disabled because
+    the autorefresh that drove visual reveals raced st.chat_input
+    submissions and broke sending. The `after` parameter is preserved
+    so the call sites that *want* to stagger (round transitions, hint
+    dispatcher output, timeout) keep their semantic intent in source —
+    when we re-enable staggering via JS-driven reveals (no Streamlit
+    rerun), those call sites won't need to change.
 
-    The pending-cursor is tracked in session_state._next_reveal_at; it
-    catches up to wall-clock as messages get revealed, so a fresh burst
-    of text after a quiet stretch starts at "now", not in the past.
+    The reveal_at field on each entry is still recorded for future
+    use (TTS triggers, JS reveal animation), just always set to now.
     """
     chat_log = st.session_state.chat_log
-    now = time.time()
-    cursor = st.session_state.get("_next_reveal_at") or now
-    if cursor < now:
-        cursor = now
-
-    if role == "user":
-        # User bubbles always reveal immediately and don't push the cursor.
-        reveal_at = now
-    elif after is None:
-        # Default: stagger host/system messages
-        delay = CHAT_STAGGER_HOST if role == "assistant" else 0.0
-        reveal_at = cursor + delay
-        st.session_state._next_reveal_at = reveal_at
-    else:
-        reveal_at = cursor + after
-        st.session_state._next_reveal_at = reveal_at
-
-    chat_log.append((role, text, reveal_at))
+    chat_log.append((role, text, time.time()))
 
 
 def _has_pending_chat(st) -> bool:
@@ -258,6 +244,35 @@ def _looks_like_nonsense(raw: str) -> bool:
     return False
 
 
+def _looks_like_obvious_garbage(raw: str) -> bool:
+    """Stronger signal than _looks_like_nonsense — input is so clearly
+    keyboard-mash that the host should fire a meme immediately, no
+    streak warmup needed. Examples that qualify:
+        'fksdsdjkf' (9 letters, no vowels)
+        'qwertyuiop' (10 letters, ≥5 consec consonants)
+        'asdfgh' (6 letters, ≥5 consec consonants)
+    Examples that don't qualify (deliberately): 'fdg', 'xyz' (too short
+    to be sure they're junk; could be a typo or abbreviation).
+    """
+    s = raw.strip()
+    if len(s) < 6:
+        return False
+    if s in _NONSENSE_KEYWORDS:
+        return False
+    vowels = sum(1 for c in s if c in _TR_VOWELS)
+    if vowels == 0:
+        return True
+    consec = 0
+    for c in s:
+        if c in _TR_NON_VOWELS:
+            consec += 1
+            if consec >= 5:
+                return True
+        else:
+            consec = 0
+    return False
+
+
 def _start_round(st, round_idx: int):
     """Initialize state for round `round_idx`. Resets revealed letters,
     chat log scoped to this round, hint chance list, silence baselines.
@@ -307,7 +322,7 @@ def _start_round(st, round_idx: int):
         st.session_state.origin_list,
     ))
     for msg, _sleep in pre_msgs:
-        _say(st, "assistant", msg)
+        _say(st, "assistant", msg, after=CHAT_STAGGER_HOST)
 
     # Mirror anything pre_info_messages revealed into the chip row.
     # We scan the messages because pre_info_messages decides probabilistically
@@ -378,18 +393,23 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
             }
             # Honor the legacy chosen_phrase callback: if the host's last
             # tease was one of the two specific lines, the response shifts.
+            # Stagger this sequence (chosen-phrase reaction + celebration)
+            # so the player can read each line.
             if state.chosen_phrase == "Bana mı soruyorsunuz, cevap mı veriyorsunuz?..":
                 _say(st, "assistant", random.choice([
                     "Cevap veriyorlar..!",
                     "Sanırım cevap veriyorsunuz ve doğru olanı yapıyorsunuz",
-                ]))
+                ]), after=CHAT_STAGGER_HOST)
             elif state.chosen_phrase == f"{word} sığıyor mu oraya?":
-                _say(st, "assistant", "Eyvah, eyvah! Efendim sığıyor mu ki?...")
+                _say(st, "assistant", "Eyvah, eyvah! Efendim sığıyor mu ki?...",
+                     after=CHAT_STAGGER_HOST)
                 _say(st, "assistant",
                     "Tabii ki sığıyor! Yalnızca biraz heyecanlandırmak istedim "
-                    "ancak buna kanmadılar kendileri...")
+                    "ancak buna kanmadılar kendileri...",
+                    after=CHAT_STAGGER_HOST)
 
-            _say(st, "assistant", correct_answer_celebration(word, round_score))
+            _say(st, "assistant", correct_answer_celebration(word, round_score),
+                 after=CHAT_STAGGER_HOST)
             state.total_score += round_score
             # Update the score-pop's "at" so the animation triggers when
             # the celebration line reveals (cursor advanced after the
@@ -578,19 +598,25 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
             state.almost_reminded_count += 1
 
     # === Nonsense / meme reply ===
-    # When the player types gibberish (low vowel ratio, consonant clusters,
-    # or short non-keyword), eventually emit a funny line.
-    # - 2+ consecutive nonsense → ~40% chance
-    # - 4+ total nonsense in round → ~60% chance
+    # When the player types gibberish, react with a funny line.
+    # Three escalating triggers:
+    # - "Obvious garbage" (e.g. 'fksdsdjkf', 'qwertyuiop') → 90% chance
+    #   on the FIRST occurrence. The signal is strong enough that
+    #   waiting for a streak is anticlimactic.
+    # - 2+ consecutive nonsense → 70% chance
+    # - 3+ consecutive OR 4+ total in round → 95% chance
     nonsense_branches = {"guess-reaction", "llm-fallback"}
     if branch_taken in nonsense_branches and _looks_like_nonsense(raw):
         state.nonsense_streak += 1
         state.nonsense_total += 1
-        prob = 0.0
-        if state.nonsense_streak >= 2:
-            prob = 0.4
-        if state.nonsense_total >= 4:
-            prob = max(prob, 0.6)
+        if _looks_like_obvious_garbage(raw):
+            prob = 0.9
+        elif state.nonsense_streak >= 3 or state.nonsense_total >= 4:
+            prob = 0.95
+        elif state.nonsense_streak >= 2:
+            prob = 0.7
+        else:
+            prob = 0.0
         if prob > 0 and random.random() < prob:
             _say(st, "assistant", nonsense_meme(), after=CHAT_STAGGER_SHORT)
     elif branch_taken in nonsense_branches:
@@ -604,15 +630,58 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
 
 
 def _advance_to_next_round(st):
-    """Move to the next round, or end the game if we're at the last."""
-    # Clear any leftover answering state from the round we're leaving.
+    """Move to the next round via the `between` transition phase.
+
+    Two random branches (60 % auto-advance / 40 % ask for confirmation),
+    handled in render_between. If we're at the last round, jump straight
+    to end — no transition needed.
+    """
     st.session_state.answer_deadline = None
     st.session_state.answer_started_at = None
     next_idx = st.session_state.round_idx + 1
     if next_idx >= TOTAL_ROUNDS:
         st.session_state.phase = "end"
+        return
+
+    # Pick a transition mode and stash the state for render_between.
+    now = time.time()
+    if random.random() < 0.6:
+        # AUTO branch — short flavor line, server timer ticks down to 0,
+        # next round auto-starts. Random 2-4s pause feels natural.
+        line = random.choice([
+            "Hadi hiç ara vermeden devam edelim...",
+            "Hız kesmeden devam edelim efendim...",
+            "Sıradaki soruya geçiyoruz...",
+            "Devam ediyoruz...",
+            "Hadi bakalım sıradakine...",
+            "Bir an bile durmadan devam efendim...",
+        ])
+        _say(st, "assistant", line)
+        st.session_state.between_state = {
+            "mode": "auto",
+            "next_idx": next_idx,
+            "auto_advance_at": now + random.uniform(2.0, 4.0),
+        }
     else:
-        _start_round(st, next_idx)
+        # WAIT branch — host asks; we stay in `between` until player
+        # types a continue-signal. If the player goes silent for 10 s
+        # the host nudges and auto-advances.
+        line = random.choice([
+            "Devam mı efendim?",
+            "Hazır hissediyor musunuz sıradakine?",
+            "Derin bir nefes alalım — devam mı?",
+            "İyi hissediyor musunuz, devam edelim mi?",
+            "Bir nefes — hazır olunca devam diyin...",
+            "Hazır mısınız sıradakine?",
+        ])
+        _say(st, "assistant", line)
+        st.session_state.between_state = {
+            "mode": "wait",
+            "next_idx": next_idx,
+            "asked_at": now,
+            "idle_nudge_at": now + 10.0,  # host says "devam edelim hadi" if quiet
+        }
+    st.session_state.phase = "between"
 
 
 # --------------------------------------------------------------------------
@@ -692,7 +761,7 @@ def _handle_answering_timeout(st):
         "at": st.session_state.get("_next_reveal_at") or time.time(),
     }
     for line in round_timeout_lines(word, round_score, state.total_score):
-        _say(st, "assistant", line)
+        _say(st, "assistant", line, after=CHAT_STAGGER_HOST)
     # Trigger the score animation alongside the LAST timeout line.
     st.session_state.score_pop["at"] = (
         st.session_state.get("_next_reveal_at") or time.time()
@@ -721,11 +790,9 @@ def render_arena(st):
     # where in the script we call it, so calling it first is purely a
     # data-flow choice — it lets us render tiles/clue with the POST-input
     # state when the input advances to the next round.
-    # Single shared key across both phases ("lexi_chat") so the input
-    # keeps focus when we transition playing ↔ answering.
     line = st.chat_input(
         "Tahmin yap, harf iste ('h'), ya da ipucu iste...",
-        key="lexi_chat",
+        key="arena_input",
     )
     if line:
         # Show a spinner during processing so even slow paths (LLM call)
@@ -836,11 +903,13 @@ def render_answering(st):
         return
 
     # === Process input BEFORE rendering (same pattern as render_arena) ===
-    # Same key as playing-phase input so focus carries across the bb
-    # transition. Streamlit treats it as the same widget instance.
+    # Distinct key from arena_input — sharing the key across phases
+    # caused Streamlit's widget reconciliation to drop submissions
+    # ("can type but can't send"). Focus loss across the bb transition
+    # is the lesser evil.
     line = st.chat_input(
         "Cevabınızı söyleyin, ipucu isteyin... (harf alamazsınız)",
-        key="lexi_chat",
+        key="answering_input",
     )
     if line:
         with st.spinner("Sunucu düşünüyor..."):
@@ -903,6 +972,188 @@ def render_answering(st):
     clue_card(st, round_ctx["clue"])
 
     st.write("")
+
+    # === Chat ===
+    _render_chat(st)
+
+
+# --------------------------------------------------------------------------
+# Prologue phase — pre-game small talk
+# --------------------------------------------------------------------------
+
+
+def render_prologue(st):
+    """Pre-game chat. Player chats with the host until they type a
+    ready-signal ('hazırım', 'başla', etc.); then we kick off round 1.
+
+    Works in both Gemini and Demo modes — host.prologue_reply falls
+    back to a scripted line when llm is None.
+    """
+    state = st.session_state.game_state
+
+    # Header (no timer, no score yet — just branding)
+    wordmark(st, level="h3")
+    st.caption(
+        "🎙️ Yarışma öncesi sohbet — hazır olunca **'hazırım'** yazın."
+    )
+
+    line = st.chat_input(
+        "Sohbet edin ya da 'hazırım' yazın...",
+        key="prologue_input",
+    )
+    if line:
+        # Echo the player's bubble immediately
+        _say(st, "user", line)
+
+        if host.is_ready_signal(line):
+            # Bridge into round 1
+            _say(
+                st, "assistant",
+                "Öyleyse başlayabiliriz... Şöyle derin bir nefes alın...",
+            )
+            _say(st, "assistant", "İlk soruyla başlıyorum öyleyse...")
+            # Initialize round 0 and switch phases
+            _start_round(st, 0)
+            st.session_state.phase = "playing"
+            st.rerun()
+            return
+
+        # Otherwise — keep chatting. Append to the LLM history and reply.
+        messages = st.session_state.prologue_messages or []
+        messages.append({"role": "user", "content": line})
+        with st.spinner("Sunucu düşünüyor..."):
+            try:
+                reply = host.prologue_reply(st.session_state.llm, messages)
+            except Exception:
+                reply = "Hmm, devam edelim efendim."
+        _say(st, "assistant", reply)
+        messages.append({"role": "assistant", "content": reply})
+        st.session_state.prologue_messages = messages
+        st.rerun()
+        return
+
+    # Render chat below input
+    _render_chat(st)
+
+
+# --------------------------------------------------------------------------
+# Between-rounds transition phase — auto-advance OR wait for "devam"
+# --------------------------------------------------------------------------
+
+
+_CONTINUE_SIGNALS = frozenset({
+    "devam", "hadi", "tabii", "evet", "d", "başla", "basla",
+    "hazırım", "hazir", "hazır", "olur", "tamam",
+})
+
+
+def _looks_like_continue(text: str) -> bool:
+    low = text.lower().strip()
+    if not low:
+        return False
+    if low in _CONTINUE_SIGNALS:
+        return True
+    # Match "devam" / "hadi" / "tabii devam" / "hadi bakalım" anywhere
+    toks = set(low.replace("?", "").replace("!", "").replace(".", "").split())
+    return bool(toks & _CONTINUE_SIGNALS)
+
+
+def render_between(st):
+    """Render the inter-round transition.
+
+    Two modes (chosen at round-end in _advance_to_next_round):
+      auto — short flavor line; auto-advances after 2-4 s.
+      wait — host asks; waits for player to type 'devam' / 'hadi' / etc.
+             Idle 10 s → host says "Devam edelim hadi" and auto-advances.
+
+    We use a 1-s autorefresh ONLY in the auto branch (so the timer
+    actually fires) and the wait branch falls back to a 1-s autorefresh
+    too once we're waiting on the idle nudge. Autorefresh in `between`
+    is safe — there's no critical-input race like in playing where
+    a stray rerun would drop a chat submission, because the only
+    keyword we listen for is 'devam' (the player can re-type it
+    if it gets eaten, which is essentially never anyway with a 1-s
+    interval and no spinner).
+    """
+    state = st.session_state.game_state
+    bs = st.session_state.between_state or {}
+    next_idx = bs.get("next_idx", st.session_state.round_idx + 1)
+    mode = bs.get("mode", "auto")
+
+    # === Player input FIRST ===
+    # Read chat_input before the timer checks so a typed 'devam' is
+    # never beaten to the punch by an autorefresh-triggered auto-advance.
+    placeholder = (
+        "Devam diyin ya da bir şey söyleyin..."
+        if mode == "wait"
+        else "Hazırlanıyoruz... ('puan' yazıp skor görebilirsiniz)"
+    )
+    line = st.chat_input(placeholder, key="between_input")
+    if line:
+        _say(st, "user", line)
+        raw = line.lower().strip()
+        if raw == "puan":
+            _say(st, "assistant",
+                 f"Şu anki toplam puanınız: {state.total_score}")
+            st.rerun()
+            return
+        if _looks_like_continue(line):
+            _start_round(st, next_idx)
+            st.session_state.phase = "playing"
+            st.session_state.between_state = None
+            st.rerun()
+            return
+        # Anything else — gentle nudge, stay in `between`.
+        _say(st, "assistant",
+             random.choice([
+                 "'Devam' deyince geçeriz efendim...",
+                 "Hazır olunca 'devam' diyin yeter...",
+                 "Cevabı sıradaki sorudan sonra konuşalım — 'devam' diyin...",
+             ]))
+        # Reset the idle-nudge clock on any input + give a longer
+        # auto-advance timeout so the host doesn't immediately yank
+        # the player into the next round mid-conversation.
+        if mode == "wait":
+            bs["idle_nudge_at"] = time.time() + 10.0
+            bs["nudged"] = False
+            st.session_state.between_state = bs
+        st.rerun()
+        return
+
+    # === Auto-advance check (only after no input was just submitted) ===
+    now = time.time()
+    auto_at = bs.get("auto_advance_at")
+    if auto_at is not None and now >= auto_at:
+        _start_round(st, next_idx)
+        st.session_state.phase = "playing"
+        st.session_state.between_state = None
+        st.rerun()
+        return
+
+    # === Idle-nudge check (wait mode only) ===
+    if mode == "wait":
+        nudge_at = bs.get("idle_nudge_at")
+        if nudge_at is not None and now >= nudge_at and not bs.get("nudged"):
+            _say(st, "assistant", "Devam edelim hadi efendim...")
+            bs["nudged"] = True
+            # After the nudge, give the player one more beat then auto-go.
+            bs["auto_advance_at"] = now + 2.5
+            st.session_state.between_state = bs
+            st.rerun()
+            return
+
+    # === Header (compact — no timer, score chip + round indicator) ===
+    wordmark(st, level="h3")
+    topbar(
+        st,
+        score=state.total_score,
+        round_num=st.session_state.round_idx + 1,
+        total_rounds=TOTAL_ROUNDS,
+        seconds_remaining=int(state.total_time),
+        in_answer_mode=False,
+        live=False,  # global timer is paused-ish during transition
+        pop=_consume_score_pop(st),
+    )
 
     # === Chat ===
     _render_chat(st)
