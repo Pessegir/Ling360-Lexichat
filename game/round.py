@@ -10,7 +10,8 @@ import random
 import editdistance
 import nltk
 
-from .nlp import get_synonym_phrase, similar_word_hint
+from .data import lookup_definition
+from .nlp import get_synonym_phrase, similar_word_hint, synonym_hint
 
 
 # --------------------------------------------------------------------------
@@ -141,15 +142,180 @@ def give_hint(chance_list, round_idx, word, example_sentences, compound_list,
 # --------------------------------------------------------------------------
 
 
+_TEACH_DEFINITION_LINES = [
+    "Hayır efendim, '{w}' '{d}' demek; aradığımız bu değil...",
+    "Olmadı, '{w}' '{d}' anlamına gelir... Bizim aradığımız başka...",
+    "Yakın değil efendim, '{w}' demek '{d}' demek; tekrar düşünelim...",
+    "'{w}' '{d}' anlamında ama bizim sorduğumuz bu değil...",
+]
+
+_TEACH_SYNONYM_LINES = [
+    "Hayır efendim, '{w}' kelimesi {s} gibi sözcüklerle yakın anlamlı; bizim aradığımız bu değil...",
+    "Olmadı, '{w}' demek aşağı yukarı {s} gibi bir şey... Aradığımız başka...",
+    "'{w}' kelimesini {s} ile yan yana koyabiliriz ama bizim sorduğumuz bu değil...",
+]
+
+# Definition handling: use as-is up to _DEF_LENGTH_CAP; gracefully
+# truncate at a word boundary up to _DEF_HARD_LIMIT; beyond that fall
+# back to a synonym list. Calibrated on real gts entries — most words
+# (huysuz=28, melun=42) fit comfortably; longer ones (kitap=92,
+# cumhuriyet=133) truncate cleanly.
+_DEF_LENGTH_CAP = 120
+_DEF_HARD_LIMIT = 220
+
+
+def _shorten_definition(text):
+    """Return a host-readable definition string, or None if unusable.
+
+    - Up to _DEF_LENGTH_CAP: returned as-is.
+    - Up to _DEF_HARD_LIMIT: truncated at the last space before the cap,
+      with "..." appended.
+    - Beyond _DEF_HARD_LIMIT: too long to read aloud, return None.
+    """
+    if not text:
+        return None
+    text = text.strip()
+    if len(text) <= _DEF_LENGTH_CAP:
+        return text
+    if len(text) > _DEF_HARD_LIMIT:
+        return None
+    cut = text.rfind(" ", 0, _DEF_LENGTH_CAP)
+    if cut < _DEF_LENGTH_CAP * 0.6:  # no good break point — give up
+        return None
+    return text[:cut].rstrip(",;:") + "..."
+
+
+# Tokens that, when present, suggest the player is asking what a word
+# means rather than guessing. "neydi", "nedir", "neymiş" are single-token
+# triggers; the "ne demek / ne anlama / ..." patterns need a paired token.
+_DEF_QUESTION_TRIGGERS = {"neydi", "nedir", "neymiş"}
+_NE_PARTNERS = {"demek", "demekti", "anlam", "anlama", "anlamı", "anlami"}
+# Tokens to skip when extracting the target word from a definition question.
+_QUESTION_SKIP_TOKENS = {
+    "ne", "neydi", "nedir", "neymiş", "demek", "demekti", "demekmiş",
+    "anlam", "anlama", "anlamı", "anlami", "ya", "ki", "peki", "hani",
+    "yahu", "be", "?", ".", ",", "...", "!", "''", '"',
+}
+
+
+def _is_definition_question(tkn):
+    """True if the input looks like 'X neydi?' / 'X ne demek?' / 'ne demek X?'."""
+    if any(t in tkn for t in _DEF_QUESTION_TRIGGERS):
+        return True
+    if "ne" in tkn and any(t in tkn for t in _NE_PARTNERS):
+        return True
+    return False
+
+
+def _extract_target_word(tkn, gts_index):
+    """Find the word in tkn the player is most likely asking about.
+
+    Strips question keywords, then returns the FIRST remaining token
+    if it's in the dictionary. If the first non-skip token isn't a
+    dictionary word, returns None — we'd rather not answer than guess
+    that the player meant some other word later in the sentence.
+    """
+    if gts_index is None:
+        return None
+    for t in tkn:
+        low = t.lower()
+        if low in _QUESTION_SKIP_TOKENS:
+            continue
+        if len(t) < 3 or not t.isalpha():
+            continue
+        return t if low in gts_index else None
+    return None
+
+
+_ANSWER_DEFINITION_LINES = [
+    "Efendim, '{w}' '{d}' demektir.",
+    "'{w}' kelimesi '{d}' anlamına gelir efendim.",
+    "'{w}' şu anlama gelir: '{d}'.",
+    "Şöyle ki efendim — '{w}' '{d}' demek.",
+]
+
+_ANSWER_SYNONYM_LINES = [
+    "Efendim, '{w}' kelimesi {s} gibi anlamlara gelir.",
+    "'{w}' kelimesini {s} ile yakın anlamlı sayabiliriz efendim.",
+]
+
+
+def _build_question_answer(target, gts_index, wordnet):
+    """Compose a host line that ANSWERS a definition question (no rejection)."""
+    if gts_index is not None:
+        d = _shorten_definition(lookup_definition(gts_index, target))
+        if d:
+            return random.choice(_ANSWER_DEFINITION_LINES).format(w=target, d=d)
+    if wordnet is not None:
+        try:
+            syns = synonym_hint(wordnet, target)
+        except Exception:
+            syns = "None"
+        if isinstance(syns, list) and syns:
+            picks = random.sample(syns, min(3, len(syns)))
+            return random.choice(_ANSWER_SYNONYM_LINES).format(
+                w=target, s=", ".join(picks),
+            )
+    return None
+
+
+def _build_teaching_line(raw, gts_index, wordnet):
+    """Compose a host line that gently rejects `raw` and explains it.
+
+    Tries definition first (if short enough), then synonyms. Returns None
+    if the word isn't in gts.json or wordnet — caller falls back to the
+    generic wrong-guess line.
+    """
+    if gts_index is not None:
+        definition = _shorten_definition(lookup_definition(gts_index, raw))
+        if definition:
+            return random.choice(_TEACH_DEFINITION_LINES).format(
+                w=raw, d=definition,
+            )
+
+    if wordnet is not None:
+        try:
+            syns = synonym_hint(wordnet, raw)
+        except Exception:
+            syns = "None"
+        if isinstance(syns, list) and syns:
+            picks = random.sample(syns, min(3, len(syns)))
+            return random.choice(_TEACH_SYNONYM_LINES).format(
+                w=raw, s=", ".join(picks),
+            )
+
+    return None
+
+
 def react_to_guess(raw, round_idx, word, tkn, history, synonym_list,
-                   cleaned_tokens, sorted_keywords):
+                   cleaned_tokens, sorted_keywords, *,
+                   gts_index=None, wordnet=None, in_answer_mode=False):
     """Return a host reaction string for a non-answer guess.
 
     Returns None if the input looks like chatter and should be handed to the
     LLM host fallback.
+
+    Educational lines (definition / synonym lookup) fire in three cases:
+      1. Player asks "X neydi?" / "X ne demek?" — fires in any phase.
+      2. Player insists on the same wrong real word twice — fires in
+         playing mode only (replaces the "bunu zaten söylediniz" nudge).
+      3. Wrong real-word guess in answering (bb) mode — fires 50% of the
+         time. Playing-mode wrong guesses get the generic brushoff.
     """
     string_familiarity = similar_word_hint(word, 3, cleaned_tokens, sorted_keywords)
     list_synonym = synonym_list[round_idx] if synonym_list[round_idx] != "None" else []
+
+    # === Definition question — "X neydi?" / "ne demek X?" ===
+    # Highest priority: if the player is explicitly asking what a word
+    # means, answer the question instead of treating it as a guess.
+    if _is_definition_question(tkn):
+        target = _extract_target_word(tkn, gts_index)
+        # Don't spoil the actual answer: if the target is the round's word,
+        # fall through and let the LLM host handle it.
+        if target and target.lower() != word.lower():
+            ans = _build_question_answer(target, gts_index, wordnet)
+            if ans:
+                return ans
 
     if raw in string_familiarity and raw in list_synonym:
         return "Hadi bir daha, çok çok yaklaştınız..."
@@ -168,6 +334,14 @@ def react_to_guess(raw, round_idx, word, tkn, history, synonym_list,
             "Yaklaştınız... Aynı anlama gelen başka kelime daha var...\nNeydi o..?",
         ])
     if raw in history or any(it in history for it in tkn):
+        # Insistence: in playing mode, if the player keeps repeating a
+        # real Turkish word, teach them what it actually means instead
+        # of just nudging "bunu zaten söylediniz". In answering mode the
+        # 50% rule below already handles this.
+        if not in_answer_mode:
+            teach = _build_teaching_line(raw, gts_index, wordnet)
+            if teach:
+                return teach
         return "Bunu zaten söylediniz, tekrar düşünün..."
 
     # "Çok yaklaştınız" feedback. Two conditions, both must hold:
@@ -207,6 +381,15 @@ def react_to_guess(raw, round_idx, word, tkn, history, synonym_list,
 
     # Real guess attempts: 4+ chars, single token. Generic "wrong guess".
     if len(tkn) == 1 and " " not in raw and 4 <= len(raw) <= 15:
+        # In answering (bb) mode, 50% chance to teach the player what
+        # their wrong guess actually means. In playing mode we save the
+        # educational lines for explicit questions ("X neydi?") or for
+        # repeated insistence — those branches fire above. A first-time
+        # wrong guess in playing mode just gets the generic brushoff.
+        if in_answer_mode and random.random() < 0.5:
+            teach = _build_teaching_line(raw, gts_index, wordnet)
+            if teach:
+                return teach
         return random.choice([
             "Süre akıyor, tekrar deneyin...",
             "Biraz daha düşünün isterseniz...",

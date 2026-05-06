@@ -29,8 +29,8 @@ from game.round import (
     score_for_correct_answer,
 )
 from ui.components import (
-    answer_timer, clue_card, host_bubble, info_chips, tile_board, topbar,
-    wordmark,
+    answer_timer, clue_card, focus_chat_input, host_bubble, info_chips,
+    tile_board, topbar, wordmark,
 )
 
 
@@ -411,6 +411,8 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
             _say(st, "assistant", correct_answer_celebration(word, round_score),
                  after=CHAT_STAGGER_HOST)
             state.total_score += round_score
+            state.rounds_solved += 1
+            state.words_played.append((word, "solved"))
             # Update the score-pop's "at" so the animation triggers when
             # the celebration line reveals (cursor advanced after the
             # _say above).
@@ -485,6 +487,8 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
         else:
             branch_taken = "letter-request"
             _, status = letter_request(word, state.revealed_letters)
+            if status != "all-revealed":
+                state.hints_used += 1
             # End the round when the LAST blank gets revealed (matches
             # legacy: it reveals the letter, then checks if any blanks
             # remain). status=="all-revealed" only fires when called with
@@ -495,6 +499,8 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
                 _say(st, "assistant",
                     "Üzgünüm efendim, tüm harfleri açtınız. Bu sorudan puan alamadınız!\n"
                     "Sıradaki soruya geçelim...")
+                state.rounds_failed += 1
+                state.words_played.append((word, "failed"))
                 _advance_to_next_round(st)
                 return
 
@@ -539,6 +545,9 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
         reaction = react_to_guess(
             raw, round_idx, word, tkn, st.session_state.list_active_input,
             st.session_state.synonym_list, cleaned_tokens, sorted_keywords,
+            gts_index=st.session_state.gts_index,
+            wordnet=st.session_state.wordnet,
+            in_answer_mode=in_answer_mode,
         )
         if reaction is not None:
             branch_taken = "guess-reaction"
@@ -753,6 +762,8 @@ def _handle_answering_timeout(st):
 
     round_score = score_for_correct_answer(word, state.revealed_letters)
     state.total_score -= round_score
+    state.rounds_failed += 1
+    state.words_played.append((word, "failed"))
     # Stash a negative score-pop so the renderer animates the loss.
     st.session_state.score_pop = {
         "delta": -round_score,
@@ -794,6 +805,7 @@ def render_arena(st):
         "Tahmin yap, harf iste ('h'), ya da ipucu iste...",
         key="arena_input",
     )
+    focus_chat_input(st)
     if line:
         # Show a spinner during processing so even slow paths (LLM call)
         # feel intentional rather than frozen.
@@ -911,6 +923,7 @@ def render_answering(st):
         "Cevabınızı söyleyin, ipucu isteyin... (harf alamazsınız)",
         key="answering_input",
     )
+    focus_chat_input(st)
     if line:
         with st.spinner("Sunucu düşünüyor..."):
             _handle_input(st, line, in_answer_mode=True)
@@ -1001,6 +1014,7 @@ def render_prologue(st):
         "Sohbet edin ya da 'hazırım' yazın...",
         key="prologue_input",
     )
+    focus_chat_input(st)
     if line:
         # Echo the player's bubble immediately
         _say(st, "user", line)
@@ -1089,6 +1103,7 @@ def render_between(st):
         else "Hazırlanıyoruz... ('puan' yazıp skor görebilirsiniz)"
     )
     line = st.chat_input(placeholder, key="between_input")
+    focus_chat_input(st)
     if line:
         _say(st, "user", line)
         raw = line.lower().strip()

@@ -345,6 +345,27 @@ def player_bubble(st, text: str):
 # --------------------------------------------------------------------------
 
 
+def focus_chat_input(st):
+    """Re-acquire focus on the st.chat_input textarea after a Streamlit rerun.
+
+    Streamlit reruns rebuild the widget tree, so the textarea loses focus
+    on every transition (round change, bb press, idle nudge). Players have
+    to click the box again before they can type, which makes timed phases
+    feel sluggish. We inject JS that finds the chat input and calls
+    .focus() — runs once per render, so we don't steal focus mid-typing.
+
+    Best-effort: tries the modern testid first, falls back to looser
+    selectors if Streamlit's DOM changes.
+    """
+    js = (
+        'var ta = d.querySelector("textarea[data-testid=\\"stChatInputTextArea\\"]")'
+        ' || d.querySelector("[data-testid=\\"stChatInput\\"] textarea")'
+        ' || d.querySelector("section.main textarea");'
+        'if (ta) { try { ta.focus(); } catch(e) {} }'
+    )
+    _inject_parent_js(js)
+
+
 def host_bubble_with_audio_hook(st, text: str, audio_url: str | None = None):
     """Host bubble that *will* show a 🔊 button when voice mode ships.
 

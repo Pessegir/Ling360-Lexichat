@@ -44,6 +44,13 @@ class GameState:
     # said the same wrong thing 5 times". Reset per round.
     input_counts: dict = field(default_factory=dict)
 
+    # Run-wide stats — survive across rounds, used by the end screen.
+    hints_used: int = 0
+    rounds_solved: int = 0
+    rounds_failed: int = 0
+    # (word, outcome) where outcome is "solved" or "failed".
+    words_played: list = field(default_factory=list)
+
     def reset_revealed(self):
         self.revealed_letters = []
 

@@ -19,13 +19,13 @@ except ImportError:
 
 from game import host
 from game.config import APP_NAME, APP_TAGLINE, TOTAL_GAME_TIME, TOTAL_ROUNDS
-from game.round import end_game_lines
 from game.session import build_new_game, load_static_resources
 from game.state import GameState
 from llm_client import LLMError, GeminiClient
 from ui import theme
 from ui.arena import render_arena, render_answering, render_between, render_prologue
 from ui.components import host_bubble, wordmark
+from ui.end import render_end
 
 
 # --------------------------------------------------------------------------
@@ -287,6 +287,8 @@ def render_loading():
     st.session_state.structure_list = payload["structure_list"]
     st.session_state.example_sentences = payload["example_sentences"]
     st.session_state.corpus = resources["corpus"]
+    st.session_state.gts_index = resources["gts_index"]
+    st.session_state.wordnet = resources["wordnet"]
     st.session_state.chat_log = []
     st.session_state._next_reveal_at = None
 
@@ -336,34 +338,6 @@ def render_history():
 # --------------------------------------------------------------------------
 
 
-def render_end_placeholder():
-    wordmark(st, level="h2")
-    st.write("")
-    state = st.session_state.game_state
-    if state:
-        score = state.total_score
-        ran_out = state.game_over
-        host_bubble(st, end_game_lines(score, state.username, ran_out))
-        st.markdown(f"### Toplam puan: **{score:,}**")
-    st.info(
-        "Tam bitiş ekranı (puan istatistikleri, 'tekrar oyna' butonu) "
-        "Phase 4 step 5'te gelecek.",
-        icon="🔧",
-    )
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🏠 Ana sayfa", type="primary", use_container_width=True):
-            for k in list(st.session_state.keys()):
-                if k not in ("api_key", "provider", "player_name", "player_address"):
-                    del st.session_state[k]
-            st.session_state.phase = "home"
-            st.rerun()
-    with col2:
-        if st.button("📊 Skorlar", type="secondary", use_container_width=True):
-            st.session_state.phase = "history"
-            st.rerun()
-
-
 PHASE_RENDERERS = {
     "home": render_home,
     "loading": render_loading,
@@ -371,7 +345,7 @@ PHASE_RENDERERS = {
     "playing": lambda: render_arena(st),
     "answering": lambda: render_answering(st),
     "between": lambda: render_between(st),
-    "end": render_end_placeholder,
+    "end": lambda: render_end(st),
     "history": render_history,
 }
 

@@ -51,6 +51,21 @@ def load_gts(path: Path = GTS_PATH):
     return index
 
 
+def lookup_definition(gts_index, word):
+    """First anlam (definition) for `word` from gts.json, or None.
+
+    Picks the first meaning of the first matching entry — gts.json orders
+    them by frequency / canonicality, so this is the one a player would
+    most likely have meant.
+    """
+    for entry in gts_index.get(word.lower(), []):
+        for anlam in entry.get("anlamlarListe", []) or []:
+            text = anlam.get("anlam")
+            if text:
+                return text.strip()
+    return None
+
+
 def compound_hints(gts_index, words):
     """For each word, find a compound form like 'kara ____' from gts.json.
     Returns 'None' for words without compound entries."""

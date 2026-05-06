@@ -530,6 +530,70 @@ hr {{
     max-width: 75%;
     text-align: right;
 }}
+
+/* === End screen === */
+.lexi-end-score-block {{
+    text-align: center;
+    margin: 1.5rem 0 2rem;
+    padding: 1.5rem 1rem 1.75rem;
+    background:
+        radial-gradient(ellipse 70% 70% at 50% 50%, rgba(245, 199, 106, 0.08) 0%, transparent 75%),
+        {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+}}
+
+.lexi-end-score-label {{
+    font-family: {FONT_BODY};
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    color: {TEXT_DIM};
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+}}
+
+.lexi-end-score-value {{
+    font-family: {FONT_HEADING};
+    font-size: 3.4rem;
+    font-weight: 700;
+    color: {ACCENT};
+    line-height: 1;
+    letter-spacing: -0.01em;
+}}
+
+.lexi-end-stats {{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.6rem;
+    margin: 0.5rem 0 1rem;
+}}
+
+.lexi-stat-card {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    padding: 0.85rem 0.75rem;
+    text-align: center;
+}}
+
+.lexi-stat-label {{
+    font-family: {FONT_BODY};
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: {TEXT_DIM};
+    text-transform: uppercase;
+    margin-bottom: 0.35rem;
+}}
+
+.lexi-stat-value {{
+    font-family: {FONT_HEADING};
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: {TEXT};
+    line-height: 1.1;
+}}
 </style>
 """
 
