@@ -10,7 +10,7 @@ import html as html_lib
 from game.config import TOTAL_GAME_TIME, TOTAL_ROUNDS
 from game.round import end_game_lines
 from game.scores import best_score, save_game
-from ui.components import host_bubble, wordmark
+from ui.components import host_bubble, release_chat_input_focus, wordmark
 
 
 PRESERVE_KEYS = {"api_key", "provider", "player_name", "player_address"}
@@ -67,6 +67,7 @@ def _persist_game(st, state) -> None:
 def render_end(st):
     state = st.session_state.game_state
 
+    release_chat_input_focus(st)
     wordmark(st, level="h2")
     st.write("")
 

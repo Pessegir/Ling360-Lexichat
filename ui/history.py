@@ -11,7 +11,7 @@ from datetime import datetime
 
 from game.config import TOTAL_ROUNDS
 from game.scores import clear_history, get_history
-from ui.components import wordmark
+from ui.components import release_chat_input_focus, wordmark
 
 
 def _fmt_duration(seconds: int) -> str:
@@ -84,6 +84,7 @@ def _render_row(st, row: dict, *, show_player: bool):
 
 
 def render_history(st):
+    release_chat_input_focus(st)
     wordmark(st, level="h2")
     st.write("")
     st.markdown("### Önceki Oyunlar")

@@ -346,24 +346,56 @@ def player_bubble(st, text: str):
 
 
 def focus_chat_input(st):
-    """Re-acquire focus on the st.chat_input textarea after a Streamlit rerun.
+    """Persist focus on the st.chat_input textarea across reruns.
 
-    Streamlit reruns rebuild the widget tree, so the textarea loses focus
-    on every transition (round change, bb press, idle nudge). Players have
-    to click the box again before they can type, which makes timed phases
-    feel sluggish. We inject JS that finds the chat input and calls
-    .focus() — runs once per render, so we don't steal focus mid-typing.
+    Streamlit reruns rebuild the widget tree, dropping focus. The
+    autorefresh-driven phases (`between`, `answering`) compound this by
+    triggering reruns every 1.5–3 s without user interaction; our JS
+    lives in a components.html iframe whose async load (~50–200 ms)
+    misses the moment the textarea is recreated, so keystrokes typed
+    mid-rebuild land nowhere.
 
-    Best-effort: tries the modern testid first, falls back to looser
-    selectors if Streamlit's DOM changes.
+    Fix: install a long-lived MutationObserver on window.parent that
+    refocuses the textarea synchronously whenever the DOM mutates.
+    We gate it so it never poaches focus from another input/button —
+    refocus only fires when activeElement is body/html (i.e. nothing
+    has explicit focus, which is the post-rerun state).
     """
     js = (
-        'var ta = d.querySelector("textarea[data-testid=\\"stChatInputTextArea\\"]")'
-        ' || d.querySelector("[data-testid=\\"stChatInput\\"] textarea")'
-        ' || d.querySelector("section.main textarea");'
-        'if (ta) { try { ta.focus(); } catch(e) {} }'
+        'var w=window.parent;'
+        'function _refocus(){'
+          'try{'
+            'if(!w.__lexiFocusActive)return;'
+            'var ta=d.querySelector("textarea[data-testid=\\"stChatInputTextArea\\"]")'
+            ' ||d.querySelector("[data-testid=\\"stChatInput\\"] textarea")'
+            ' ||d.querySelector("section.main textarea");'
+            'if(!ta)return;'
+            'var ae=d.activeElement;'
+            'if(ae===ta)return;'
+            # Only refocus when nothing else is intentionally focused.
+            # Body / html / null = post-rerun "lost focus" state — safe to grab.
+            'if(ae && ae!==d.body && ae!==d.documentElement)return;'
+            'ta.focus();'
+          '}catch(e){}'
+        '}'
+        'if(!w.__lexiFocusObs){'
+          'var deb;'
+          'w.__lexiFocusObs=new MutationObserver(function(){'
+            'clearTimeout(deb);'
+            'deb=setTimeout(_refocus,30);'
+          '});'
+          'w.__lexiFocusObs.observe(d.body,{childList:true,subtree:true});'
+        '}'
+        'w.__lexiFocusActive=true;'
+        '_refocus();'
     )
     _inject_parent_js(js)
+
+
+def release_chat_input_focus(st):
+    """Stop focus persistence — call from screens with no chat input
+    (home, end, history) so the observer doesn't refocus a stale element."""
+    _inject_parent_js('window.parent.__lexiFocusActive=false;')
 
 
 def host_bubble_with_audio_hook(st, text: str, audio_url: str | None = None):

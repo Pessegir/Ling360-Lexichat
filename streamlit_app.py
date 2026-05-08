@@ -24,7 +24,7 @@ from game.state import GameState
 from llm_client import LLMError, GeminiClient
 from ui import theme
 from ui.arena import render_arena, render_answering, render_between, render_prologue
-from ui.components import host_bubble, wordmark
+from ui.components import host_bubble, release_chat_input_focus, wordmark
 from ui.end import render_end
 from ui.history import render_history
 
@@ -52,7 +52,7 @@ DEFAULTS = {
     "player_name": "",
     "player_address": "bey",  # hanım / bey
     "api_key": "",
-    "provider": "gemini",     # gemini / huggingface (later) / demo
+    "provider": "demo",       # demo / gemini / huggingface (later)
     "difficulty": "normal",
     "game_state": None,       # GameState instance once a game starts
     "llm": None,
@@ -103,10 +103,17 @@ def render_sidebar():
         st.markdown("---")
 
         st.markdown("**Yapay zekâ sağlayıcısı**")
+        provider_options = [
+            "Demo modu (yapay zekâsız)",
+            "Google Gemini",
+            "Hugging Face (yakında)",
+        ]
+        provider_keys = ["demo", "gemini", "huggingface"]
+        current_key = st.session_state.provider if st.session_state.provider in provider_keys else "demo"
         provider_label = st.selectbox(
             "Sağlayıcı",
-            options=["Google Gemini", "Hugging Face (yakında)", "Demo modu (yapay zekâsız)"],
-            index=0,
+            options=provider_options,
+            index=provider_keys.index(current_key),
             label_visibility="collapsed",
         )
         if provider_label.startswith("Google Gemini"):
@@ -160,6 +167,7 @@ def render_sidebar():
 
 
 def render_home():
+    release_chat_input_focus(st)
     wordmark(st, with_tagline=True, level="h1")
     st.write("")
     st.write("")
