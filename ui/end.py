@@ -91,6 +91,7 @@ def render_end(st):
     # Personal-best banner. None  → no prior games; equal → new record;
     # otherwise → show the standing best as a small caption.
     pb_line = ""
+    is_record = False
     player_name = (st.session_state.get("player_name") or "").strip()
     if player_name and st.session_state.get("score_saved_id"):
         try:
@@ -99,6 +100,7 @@ def render_end(st):
             pb = None
         if pb is not None:
             if state.total_score >= pb:
+                is_record = True
                 pb_line = (
                     '<div class="lexi-end-pb new-record">'
                     '🏆 YENİ REKOR'
@@ -111,9 +113,10 @@ def render_end(st):
                     f'</div>'
                 )
 
+    block_class = "lexi-end-score-block" + (" is-record" if is_record else "")
     st.markdown(
         f'''
-<div class="lexi-end-score-block">
+<div class="{block_class}">
   <div class="lexi-end-score-label">TOPLAM PUAN</div>
   <div class="lexi-end-score-value">{state.total_score:,}</div>
   {pb_line}

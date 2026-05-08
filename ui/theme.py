@@ -55,11 +55,42 @@ def stylesheet() -> str:
 <style>
 /* === App shell === */
 .stApp {{
-    background:
-        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(245, 199, 106, 0.06) 0%, transparent 60%),
-        {BG};
+    background: {BG};
     color: {TEXT};
     font-family: {FONT_BODY};
+    isolation: isolate;
+}}
+
+/* Stage spotlight — top-centered amber radial with a slow breath. */
+.stApp::before {{
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background: radial-gradient(ellipse 80% 50% at 50% 0%,
+        rgba(245, 199, 106, 0.12) 0%, transparent 60%);
+    animation: lexi-stage-breath 8s ease-in-out infinite;
+}}
+
+/* Curtain falloff — faint amber/teal in the four corners, like a
+   proscenium arch. Static. */
+.stApp::after {{
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background:
+        radial-gradient(circle at top left,     rgba(245, 199, 106, 0.05) 0%, transparent 28%),
+        radial-gradient(circle at top right,    rgba(245, 199, 106, 0.05) 0%, transparent 28%),
+        radial-gradient(circle at bottom left,  rgba(90, 139, 140, 0.04) 0%, transparent 32%),
+        radial-gradient(circle at bottom right, rgba(90, 139, 140, 0.04) 0%, transparent 32%);
+}}
+
+@keyframes lexi-stage-breath {{
+    0%, 100% {{ opacity: 0.65; }}
+    50%      {{ opacity: 1.00; }}
 }}
 
 /* Kill EVERY way Streamlit fades the page during a rerun. The default
@@ -312,7 +343,8 @@ hr {{
     position: relative;
 }}
 
-/* Subtle warm vignette behind tiles — the "stage spotlight" */
+/* Subtle warm vignette behind tiles — the "stage spotlight" with a
+   slow shimmer to keep the studio feeling alive. */
 .lexi-tiles::before {{
     content: '';
     position: absolute;
@@ -321,9 +353,21 @@ hr {{
     width: 120%;
     height: 240%;
     transform: translate(-50%, -50%);
-    background: radial-gradient(ellipse, rgba(245, 199, 106, 0.08) 0%, transparent 60%);
+    background: radial-gradient(ellipse, rgba(245, 199, 106, 0.10) 0%, transparent 60%);
     pointer-events: none;
     z-index: 0;
+    animation: lexi-spotlight-breath 6s ease-in-out infinite;
+}}
+
+@keyframes lexi-spotlight-breath {{
+    0%, 100% {{
+        opacity: 0.7;
+        transform: translate(-50%, -50%) scale(0.95);
+    }}
+    50% {{
+        opacity: 1.0;
+        transform: translate(-50%, -50%) scale(1.05);
+    }}
 }}
 
 .lexi-tile {{
@@ -431,6 +475,12 @@ hr {{
 
 .lexi-chip-value.timer-warn {{
     color: {WARNING};
+    animation: lexi-timer-pulse 1.5s ease-in-out infinite;
+}}
+
+@keyframes lexi-timer-pulse {{
+    0%, 100% {{ opacity: 1.0; }}
+    50%      {{ opacity: 0.65; }}
 }}
 
 .lexi-chip-value.timer-active {{
@@ -541,6 +591,55 @@ hr {{
         {SURFACE};
     border: 1px solid {BORDER};
     border-radius: 6px;
+    position: relative;
+}}
+
+/* New-record celebration: two amber ribbons sweep across the score
+   card once, top and bottom, slightly offset and skewed. Pure CSS,
+   fires on first paint of `.is-record`. */
+.lexi-end-score-block.is-record {{
+    overflow: hidden;
+}}
+
+.lexi-end-score-block.is-record::before,
+.lexi-end-score-block.is-record::after {{
+    content: '';
+    position: absolute;
+    left: 0;
+    width: 200%;
+    height: 28px;
+    pointer-events: none;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(245, 199, 106, 0.45) 35%,
+        rgba(245, 199, 106, 0.85) 50%,
+        rgba(245, 199, 106, 0.45) 65%,
+        transparent 100%);
+    opacity: 0;
+}}
+
+.lexi-end-score-block.is-record::before {{
+    top: 18px;
+    animation: lexi-record-ribbon-l 1.7s cubic-bezier(0.4, 0, 0.2, 1) 0.35s 1 forwards;
+}}
+
+.lexi-end-score-block.is-record::after {{
+    bottom: 18px;
+    animation: lexi-record-ribbon-r 1.7s cubic-bezier(0.4, 0, 0.2, 1) 0.6s 1 forwards;
+}}
+
+@keyframes lexi-record-ribbon-l {{
+    0%   {{ opacity: 0; transform: translateX(-100%) skewY(-3deg); }}
+    20%  {{ opacity: 1; }}
+    80%  {{ opacity: 1; }}
+    100% {{ opacity: 0; transform: translateX( 50%) skewY(-3deg); }}
+}}
+
+@keyframes lexi-record-ribbon-r {{
+    0%   {{ opacity: 0; transform: translateX(-100%) skewY(3deg); }}
+    20%  {{ opacity: 1; }}
+    80%  {{ opacity: 1; }}
+    100% {{ opacity: 0; transform: translateX( 50%) skewY(3deg); }}
 }}
 
 .lexi-end-score-label {{
