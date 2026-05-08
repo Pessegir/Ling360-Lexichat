@@ -9,15 +9,20 @@ import html as html_lib
 
 from game.config import TOTAL_GAME_TIME, TOTAL_ROUNDS
 from game.round import end_game_lines
+from game.scores import best_score, save_game
 from ui.components import host_bubble, wordmark
 
 
 PRESERVE_KEYS = {"api_key", "provider", "player_name", "player_address"}
 
 
-def _format_time_taken(state) -> str:
+def _elapsed_seconds(state) -> int:
     elapsed = max(0, TOTAL_GAME_TIME - int(state.total_time))
-    elapsed = min(elapsed, TOTAL_GAME_TIME)
+    return min(elapsed, TOTAL_GAME_TIME)
+
+
+def _format_time_taken(state) -> str:
+    elapsed = _elapsed_seconds(state)
     mins, secs = divmod(elapsed, 60)
     return f"{mins} dk {secs:02d} sn"
 
@@ -26,6 +31,37 @@ def _reset_for_new_game(st):
     for k in list(st.session_state.keys()):
         if k not in PRESERVE_KEYS:
             del st.session_state[k]
+
+
+def _persist_game(st, state) -> None:
+    """Save the finished game once. Idempotent across reruns.
+
+    Skips if no rounds were engaged (e.g., the user landed on `end`
+    without playing) so the history doesn't fill with empty rows.
+    """
+    if st.session_state.get("score_saved_id") is not None:
+        return
+    if (state.rounds_solved + state.rounds_failed) == 0:
+        return
+    player_name = (st.session_state.get("player_name") or "").strip()
+    if not player_name:
+        return
+    try:
+        row_id = save_game(
+            player_name=player_name,
+            score=state.total_score,
+            rounds_completed=state.rounds_solved + state.rounds_failed,
+            hints_used=state.hints_used,
+            duration_seconds=_elapsed_seconds(state),
+            difficulty=st.session_state.get("difficulty", "normal"),
+            ran_out_of_time=bool(state.game_over),
+            words=[[w, outcome] for w, outcome in state.words_played],
+        )
+    except Exception:
+        # Persisting must never block the end screen.
+        st.session_state.score_saved_id = -1
+        return
+    st.session_state.score_saved_id = row_id
 
 
 def render_end(st):
@@ -41,17 +77,45 @@ def render_end(st):
             st.rerun()
         return
 
+    # Persist before computing best — so a fresh new-record run is
+    # reflected in the comparison.
+    _persist_game(st, state)
+
     host_bubble(
         st,
         end_game_lines(state.total_score, state.username, state.game_over),
     )
     st.write("")
 
+    # Personal-best banner. None  → no prior games; equal → new record;
+    # otherwise → show the standing best as a small caption.
+    pb_line = ""
+    player_name = (st.session_state.get("player_name") or "").strip()
+    if player_name and st.session_state.get("score_saved_id"):
+        try:
+            pb = best_score(player_name)
+        except Exception:
+            pb = None
+        if pb is not None:
+            if state.total_score >= pb:
+                pb_line = (
+                    '<div class="lexi-end-pb new-record">'
+                    '🏆 YENİ REKOR'
+                    '</div>'
+                )
+            else:
+                pb_line = (
+                    f'<div class="lexi-end-pb">'
+                    f'En iyi: <strong>{pb:,}</strong>'
+                    f'</div>'
+                )
+
     st.markdown(
         f'''
 <div class="lexi-end-score-block">
   <div class="lexi-end-score-label">TOPLAM PUAN</div>
   <div class="lexi-end-score-value">{state.total_score:,}</div>
+  {pb_line}
 </div>
 ''',
         unsafe_allow_html=True,

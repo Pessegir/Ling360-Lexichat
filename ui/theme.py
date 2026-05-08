@@ -594,6 +594,84 @@ hr {{
     color: {TEXT};
     line-height: 1.1;
 }}
+
+/* Personal-best line below the big score on the end screen */
+.lexi-end-pb {{
+    margin-top: 0.85rem;
+    font-family: {FONT_HEADING};
+    font-size: 0.85rem;
+    letter-spacing: 0.06em;
+    color: {TEXT_DIM};
+}}
+
+.lexi-end-pb strong {{
+    color: {TEXT};
+    font-weight: 600;
+}}
+
+.lexi-end-pb.new-record {{
+    color: {ACCENT};
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-size: 0.95rem;
+}}
+
+/* === History list === */
+.lexi-hist-row {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    transition: border-color 0.15s ease;
+}}
+
+.lexi-hist-row:hover {{
+    border-color: {BORDER_BRIGHT};
+}}
+
+.lexi-hist-row-top {{
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}}
+
+.lexi-hist-date {{
+    font-family: {FONT_HEADING};
+    font-size: 0.85rem;
+    color: {TEXT_DIM};
+    letter-spacing: 0.04em;
+}}
+
+.lexi-hist-player {{
+    font-family: {FONT_BODY};
+    font-size: 0.8rem;
+    color: {TEXT_DIM};
+    flex-grow: 1;
+    text-align: left;
+}}
+
+.lexi-hist-score {{
+    font-family: {FONT_HEADING};
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: {ACCENT};
+    line-height: 1;
+    margin-left: auto;
+}}
+
+.lexi-hist-row-meta {{
+    margin-top: 0.45rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    color: {TEXT_DIM};
+    font-size: 0.82rem;
+    font-family: {FONT_BODY};
+}}
 </style>
 """
 

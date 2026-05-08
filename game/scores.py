@@ -71,12 +71,12 @@ def get_history(player_name: str = None, limit: int = 50,
         if player_name:
             cur.execute(
                 "SELECT * FROM games WHERE player_name = ? "
-                "ORDER BY played_at DESC LIMIT ?",
+                "ORDER BY played_at DESC, id DESC LIMIT ?",
                 (player_name.strip(), limit),
             )
         else:
             cur.execute(
-                "SELECT * FROM games ORDER BY played_at DESC LIMIT ?",
+                "SELECT * FROM games ORDER BY played_at DESC, id DESC LIMIT ?",
                 (limit,),
             )
         rows = []

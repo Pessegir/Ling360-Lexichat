@@ -26,6 +26,7 @@ from ui import theme
 from ui.arena import render_arena, render_answering, render_between, render_prologue
 from ui.components import host_bubble, wordmark
 from ui.end import render_end
+from ui.history import render_history
 
 
 # --------------------------------------------------------------------------
@@ -291,6 +292,10 @@ def render_loading():
     st.session_state.wordnet = resources["wordnet"]
     st.session_state.chat_log = []
     st.session_state._next_reveal_at = None
+    # Clear any leftover end-of-game flags from a previous run so this
+    # game's end-screen will save its row.
+    st.session_state.score_saved_id = None
+    st.session_state.history_clear_confirm = False
 
     # Open the prologue: greeting + LLM (or scripted) opener.
     from ui.arena import _say
@@ -319,21 +324,6 @@ def render_loading():
 
 
 # --------------------------------------------------------------------------
-# History screen — placeholder until step 6
-# --------------------------------------------------------------------------
-
-
-def render_history():
-    wordmark(st, level="h2")
-    st.write("")
-    st.markdown("### Önceki Oyunlar")
-    st.info(
-        "Skor geçmişi Phase 4 step 6'da bağlanacak. Şimdilik bu sayfa boş.",
-        icon="🔧",
-    )
-
-
-# --------------------------------------------------------------------------
 # Phase router
 # --------------------------------------------------------------------------
 
@@ -346,7 +336,7 @@ PHASE_RENDERERS = {
     "answering": lambda: render_answering(st),
     "between": lambda: render_between(st),
     "end": lambda: render_end(st),
-    "history": render_history,
+    "history": lambda: render_history(st),
 }
 
 
