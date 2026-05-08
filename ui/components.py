@@ -35,20 +35,44 @@ def _inject_parent_js(script_body: str, *, height: int = 0):
 # --------------------------------------------------------------------------
 
 
+# Microphone glyph for the wordmark — line-art SVG, amber stroke.
+# Inline so the home screen has zero extra HTTP requests.
+_MIC_SVG = (
+    '<svg class="lexi-mic-glyph" viewBox="0 0 24 24" fill="none" '
+    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+    'stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="9" y="3" width="6" height="11" rx="3"/>'
+    '<path d="M5 11a7 7 0 0 0 14 0"/>'
+    '<line x1="12" y1="18" x2="12" y2="22"/>'
+    '<line x1="8" y1="22" x2="16" y2="22"/>'
+    '</svg>'
+)
+
+
 def wordmark(st, *, with_tagline: bool = False, level: str = "h1"):
     """Render the Lexi-Chat wordmark. Accent dot on the hyphen.
 
     level: HTML tag — h1 for landing, h3 for in-game header.
+    Microphone glyph appears alongside on the landing wordmark
+    (with_tagline=True) — a small TV-studio cue.
     """
     name = html_lib.escape(APP_NAME)
     parts = name.split("-", 1)
     if len(parts) == 2:
-        markup = f'<{level} class="lexi-wordmark">{parts[0]}<span class="accent">-</span>{parts[1]}</{level}>'
+        wm_inner = f'{parts[0]}<span class="accent">-</span>{parts[1]}'
     else:
-        markup = f'<{level} class="lexi-wordmark">{name}</{level}>'
+        wm_inner = name
 
     if with_tagline:
-        markup += f'<div class="lexi-tagline">{html_lib.escape(APP_TAGLINE)}</div>'
+        markup = (
+            f'<div class="lexi-wordmark-row">'
+            f'  {_MIC_SVG}'
+            f'  <{level} class="lexi-wordmark" style="margin:0;">{wm_inner}</{level}>'
+            f'</div>'
+            f'<div class="lexi-tagline" style="text-align:center;">{html_lib.escape(APP_TAGLINE)}</div>'
+        )
+    else:
+        markup = f'<{level} class="lexi-wordmark">{wm_inner}</{level}>'
 
     st.markdown(markup, unsafe_allow_html=True)
 
@@ -184,6 +208,20 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
                 f'data-pop-id="{pop_id}">{sign}{delta:,}</span>'
             )
 
+    # Round indicator: dots instead of "3 / 14" text. Done = dim amber,
+    # active = bright amber + glow, future = neutral. The chip-value
+    # text version is kept as aria-label for screen readers.
+    dot_html = []
+    for i in range(total_rounds):
+        if i < round_num - 1:
+            cls = "lexi-round-dot done"
+        elif i == round_num - 1:
+            cls = "lexi-round-dot active"
+        else:
+            cls = "lexi-round-dot"
+        dot_html.append(f'<span class="{cls}"></span>')
+    dots = "".join(dot_html)
+
     st.markdown(
         f'''
 <div class="lexi-topbar">
@@ -193,7 +231,7 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
   </div>
   <div class="lexi-chip">
     <div class="lexi-chip-label">SORU</div>
-    <div class="lexi-chip-value">{round_num} / {total_rounds}</div>
+    <div class="lexi-round-dots" aria-label="{round_num} / {total_rounds}">{dots}</div>
   </div>
   <div class="lexi-chip" style="align-items: flex-end;">
     <div class="lexi-chip-label">{timer_label}</div>

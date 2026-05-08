@@ -252,13 +252,39 @@ def _make_llm():
     return None
 
 
+def _lights_html(active_step: int, label: str, total_steps: int = 3) -> str:
+    """Render the three "tuning lights" — past steps glow, current pulses,
+    future stay dim. active_step in [0..total_steps]; total_steps means
+    all three lit, no pulser.
+    """
+    pieces = []
+    for i in range(total_steps):
+        if i < active_step:
+            cls = "lexi-light on"
+        elif i == active_step:
+            cls = "lexi-light active"
+        else:
+            cls = "lexi-light"
+        pieces.append(f'<div class="{cls}"></div>')
+    return (
+        f'<div class="lexi-loading">'
+        f'<div class="lexi-lights">{"".join(pieces)}</div>'
+        f'<div class="lexi-loading-step">{label}</div>'
+        f'</div>'
+    )
+
+
 def render_loading():
     wordmark(st, level="h2")
     st.write("")
     host_bubble(st, "Hazırlanıyorum efendim, biraz bekleyin lütfen...")
     st.write("")
 
-    progress = st.progress(0, text="Sözlük ve dil araçları yükleniyor...")
+    status = st.empty()
+    status.markdown(
+        _lights_html(0, "Sözlük ve dil araçları yükleniyor..."),
+        unsafe_allow_html=True,
+    )
     try:
         resources = _cached_static_resources()
     except Exception as e:
@@ -267,10 +293,16 @@ def render_loading():
             st.session_state.phase = "home"
             st.rerun()
         return
-    progress.progress(40, text="Yapay zekâ bağlanıyor...")
+    status.markdown(
+        _lights_html(1, "Yapay zekâ bağlanıyor..."),
+        unsafe_allow_html=True,
+    )
 
     llm = _make_llm()
-    progress.progress(60, text="14 kelime seçiliyor...")
+    status.markdown(
+        _lights_html(2, "14 kelime seçiliyor..."),
+        unsafe_allow_html=True,
+    )
 
     try:
         payload = build_new_game(resources, llm)
@@ -280,7 +312,7 @@ def render_loading():
             st.session_state.phase = "home"
             st.rerun()
         return
-    progress.progress(100, text="Hazır!")
+    status.markdown(_lights_html(3, "Hazır!"), unsafe_allow_html=True)
 
     # Seed all session state for the game
     full_username = f"{st.session_state.player_name} {st.session_state.player_address}"

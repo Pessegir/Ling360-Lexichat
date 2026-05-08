@@ -13,6 +13,26 @@ from game.scores import best_score, save_game
 from ui.components import host_bubble, release_chat_input_focus, wordmark
 
 
+# Inline stat-card icons. Tiny line-art SVGs, amber stroke (currentColor
+# inherits from .lexi-stat-label).
+_ICON_CHECK = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+    '<polyline points="20 6 9 17 4 12"/></svg>'
+)
+_ICON_LETTER = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M5 21l7-18 7 18"/><path d="M8 14h8"/></svg>'
+)
+_ICON_CLOCK = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="9"/>'
+    '<polyline points="12 7 12 12 15 14"/></svg>'
+)
+
+
 PRESERVE_KEYS = {"api_key", "provider", "player_name", "player_address"}
 
 
@@ -130,15 +150,15 @@ def render_end(st):
         f'''
 <div class="lexi-end-stats">
   <div class="lexi-stat-card">
-    <div class="lexi-stat-label">DOĞRU CEVAP</div>
+    <div class="lexi-stat-label">{_ICON_CHECK}<span>DOĞRU CEVAP</span></div>
     <div class="lexi-stat-value">{state.rounds_solved} / {TOTAL_ROUNDS}</div>
   </div>
   <div class="lexi-stat-card">
-    <div class="lexi-stat-label">HARF AÇILDI</div>
+    <div class="lexi-stat-label">{_ICON_LETTER}<span>HARF AÇILDI</span></div>
     <div class="lexi-stat-value">{state.hints_used}</div>
   </div>
   <div class="lexi-stat-card">
-    <div class="lexi-stat-label">SÜRE</div>
+    <div class="lexi-stat-label">{_ICON_CLOCK}<span>SÜRE</span></div>
     <div class="lexi-stat-value">{time_str}</div>
   </div>
 </div>

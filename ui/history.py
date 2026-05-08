@@ -14,6 +14,29 @@ from game.scores import clear_history, get_history
 from ui.components import release_chat_input_focus, wordmark
 
 
+_ICON_DECK = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<rect x="4" y="6" width="16" height="14" rx="2"/>'
+    '<path d="M8 6V4M16 6V4M4 11h16"/></svg>'
+)
+_ICON_TROPHY = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/>'
+    '<path d="M5 5H3v2a3 3 0 0 0 3 3"/>'
+    '<path d="M19 5h2v2a3 3 0 0 1-3 3"/>'
+    '<path d="M10 14v3"/><path d="M14 14v3"/>'
+    '<path d="M8 21h8"/></svg>'
+)
+_ICON_CHART = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<polyline points="3 17 9 11 13 15 21 7"/>'
+    '<polyline points="14 7 21 7 21 14"/></svg>'
+)
+
+
 def _fmt_duration(seconds: int) -> str:
     seconds = max(0, int(seconds or 0))
     mins, secs = divmod(seconds, 60)
@@ -125,15 +148,15 @@ def render_history(st):
             f'''
 <div class="lexi-end-stats">
   <div class="lexi-stat-card">
-    <div class="lexi-stat-label">OYUN</div>
+    <div class="lexi-stat-label">{_ICON_DECK}<span>OYUN</span></div>
     <div class="lexi-stat-value">{total}</div>
   </div>
   <div class="lexi-stat-card">
-    <div class="lexi-stat-label">EN İYİ</div>
+    <div class="lexi-stat-label">{_ICON_TROPHY}<span>EN İYİ</span></div>
     <div class="lexi-stat-value">{best:,}</div>
   </div>
   <div class="lexi-stat-card">
-    <div class="lexi-stat-label">ORTALAMA</div>
+    <div class="lexi-stat-label">{_ICON_CHART}<span>ORTALAMA</span></div>
     <div class="lexi-stat-value">{avg:,}</div>
   </div>
 </div>

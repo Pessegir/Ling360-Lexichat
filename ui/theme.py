@@ -379,9 +379,17 @@ hr {{
     transform: rotate(45deg);
     border: 1.5px solid {BORDER_BRIGHT};
     background: {SURFACE};
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
     position: relative;
     z-index: 1;
+}}
+
+/* Desktop hover: subtle lift. Pointer-coarse devices don't get hover at all
+   (they'd interpret tap as hover and stick). */
+@media (hover: hover) and (pointer: fine) {{
+    .lexi-tile:hover {{
+        transform: rotate(45deg) translateY(-3px);
+    }}
 }}
 
 .lexi-tile.revealed {{
@@ -770,6 +778,162 @@ hr {{
     color: {TEXT_DIM};
     font-size: 0.82rem;
     font-family: {FONT_BODY};
+}}
+
+/* === Stat-card icons (end screen + history) === */
+.lexi-stat-label {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+}}
+
+.lexi-stat-label svg {{
+    width: 12px;
+    height: 12px;
+    color: {ACCENT};
+    flex-shrink: 0;
+}}
+
+/* === Round-indicator dots (replaces "3 / 14" text) === */
+.lexi-round-dots {{
+    display: flex;
+    gap: 4px;
+    margin-top: 0.35rem;
+    flex-wrap: wrap;
+    max-width: 240px;
+    align-items: center;
+}}
+
+.lexi-round-dot {{
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: {BORDER_BRIGHT};
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+}}
+
+.lexi-round-dot.done {{
+    background: {ACCENT_DIM};
+}}
+
+.lexi-round-dot.active {{
+    background: {ACCENT};
+    box-shadow: 0 0 6px rgba(245, 199, 106, 0.55);
+    width: 9px;
+    height: 9px;
+}}
+
+/* === Wordmark microphone glyph (home screen) === */
+.lexi-wordmark-row {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+}}
+
+.lexi-mic-glyph {{
+    color: {ACCENT};
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 8px rgba(245, 199, 106, 0.25));
+}}
+
+/* === Loading "tuning lights" === */
+.lexi-loading {{
+    text-align: center;
+    padding: 1.25rem 0 0.5rem;
+}}
+
+.lexi-lights {{
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    margin-bottom: 0.9rem;
+}}
+
+.lexi-lights .lexi-light {{
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: {BORDER_BRIGHT};
+    box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.4);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+}}
+
+.lexi-lights .lexi-light.on {{
+    background: {ACCENT_DIM};
+    box-shadow: 0 0 10px rgba(245, 199, 106, 0.4);
+}}
+
+.lexi-lights .lexi-light.active {{
+    background: {ACCENT};
+    box-shadow: 0 0 14px rgba(245, 199, 106, 0.7);
+    animation: lexi-light-pulse 1.1s ease-in-out infinite;
+}}
+
+@keyframes lexi-light-pulse {{
+    0%, 100% {{ transform: scale(1); }}
+    50%      {{ transform: scale(1.25); }}
+}}
+
+.lexi-loading-step {{
+    color: {TEXT_DIM};
+    font-family: {FONT_HEADING};
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}}
+
+/* === Mobile breakpoint (≤ 480 px) === */
+@media (max-width: 480px) {{
+    .main .block-container {{
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }}
+
+    .lexi-tile {{
+        width: 42px;
+        height: 42px;
+    }}
+
+    .lexi-tile span {{
+        font-size: 1.1rem;
+    }}
+
+    .lexi-tiles {{
+        gap: 6px;
+        padding: 1rem 0;
+    }}
+
+    .lexi-topbar {{
+        flex-wrap: wrap;
+        gap: 0.6rem 1rem;
+        padding: 0.7rem 0.85rem;
+    }}
+
+    .lexi-topbar .lexi-chip {{
+        flex-basis: 45%;
+    }}
+
+    /* Round dots wrap two rows on mobile rather than overflow */
+    .lexi-round-dots {{
+        max-width: 160px;
+    }}
+
+    .lexi-end-stats {{
+        grid-template-columns: 1fr 1fr;
+    }}
+
+    .lexi-end-score-value {{
+        font-size: 2.6rem;
+    }}
+
+    .lexi-mic-glyph {{
+        width: 28px;
+        height: 28px;
+    }}
 }}
 </style>
 """
