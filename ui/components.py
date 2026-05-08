@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html as html_lib
 import time
+from contextlib import contextmanager
 
 import streamlit.components.v1 as components
 
@@ -82,7 +83,7 @@ def wordmark(st, *, with_tagline: bool = False, level: str = "h1"):
 # --------------------------------------------------------------------------
 
 
-def tile_board(st, word_or_length, revealed_letters=None):
+def tile_board(st, word_or_length, revealed_letters=None, *, board_key: str = ""):
     """Render the diamond letter board.
 
     Two ways to call:
@@ -91,6 +92,11 @@ def tile_board(st, word_or_length, revealed_letters=None):
 
     revealed_letters uses the engine's "_  " sentinel for blanks (matches
     GameState.revealed_letters). Strings of length 1 are treated as revealed.
+
+    board_key: stable per-round identifier (e.g. "{round_idx}:{word}").
+    JS uses it to dedup which tiles are newly-revealed and only animate
+    the flip on those — without dedup, every rerun re-fires the
+    animation on every revealed tile.
     """
     if isinstance(word_or_length, int):
         slots = ["_  "] * word_or_length
@@ -104,14 +110,42 @@ def tile_board(st, word_or_length, revealed_letters=None):
         if i < len(revealed) and revealed[i] != "_  " and len(revealed[i].strip()) >= 1:
             # Turkish-correct uppercase: ı → I, i → İ, ş → Ş, etc.
             ch = html_lib.escape(tr_upper(revealed[i].strip()[:1]))
-            tiles_html.append(f'<div class="lexi-tile revealed"><span>{ch}</span></div>')
+            tiles_html.append(
+                f'<div class="lexi-tile revealed" data-pos="{i}"><span>{ch}</span></div>'
+            )
         else:
-            tiles_html.append('<div class="lexi-tile"><span>&nbsp;</span></div>')
+            tiles_html.append(
+                f'<div class="lexi-tile" data-pos="{i}"><span>&nbsp;</span></div>'
+            )
 
+    safe_key = html_lib.escape(board_key)
     st.markdown(
-        f'<div class="lexi-tiles">{"".join(tiles_html)}</div>',
+        f'<div class="lexi-tiles" data-board-key="{safe_key}">{"".join(tiles_html)}</div>',
         unsafe_allow_html=True,
     )
+
+    if board_key:
+        # Per-board dedup: track which positions were already revealed in
+        # __lexiTileSeen[boardKey]. Only NEWLY revealed tiles get the
+        # .lexi-flip class on this rerun, so the flip animation fires
+        # exactly once per reveal — even though autorefresh in the
+        # answering phase rebuilds the DOM every 3 s.
+        js = (
+            'var w=window.parent;'
+            'var board=d.querySelector(".lexi-tiles");'
+            'if(!board)return;'
+            'var key=board.getAttribute("data-board-key")||"";'
+            'w.__lexiTileSeen=w.__lexiTileSeen||{};'
+            'var seen=w.__lexiTileSeen[key]||{};'
+            'var tiles=board.querySelectorAll(".lexi-tile");'
+            'tiles.forEach(function(t,i){'
+              'var isRev=t.classList.contains("revealed");'
+              'if(isRev && !seen[i]){t.classList.add("lexi-flip");}'
+              'seen[i]=isRev;'
+            '});'
+            'w.__lexiTileSeen[key]=seen;'
+        )
+        _inject_parent_js(js)
 
 
 # --------------------------------------------------------------------------
@@ -168,7 +202,8 @@ def info_chips(st, revealed: dict):
 
 def topbar(st, *, score: int, round_num: int, total_rounds: int,
            seconds_remaining: int, in_answer_mode: bool = False,
-           live: bool = False, pop: dict | None = None):
+           live: bool = False, pop: dict | None = None,
+           game_key: str = ""):
     """Render the score/round/timer header strip.
 
     in_answer_mode = True → label changes to "CEVAP SÜRESİ", color shifts amber.
@@ -222,12 +257,15 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
         dot_html.append(f'<span class="{cls}"></span>')
     dots = "".join(dot_html)
 
+    safe_game_key = html_lib.escape(game_key)
     st.markdown(
         f'''
 <div class="lexi-topbar">
   <div class="lexi-chip">
     <div class="lexi-chip-label">PUAN</div>
-    <div class="lexi-chip-value">{score:,}{pop_html}</div>
+    <div class="lexi-chip-value">
+      <span class="lexi-score-num" data-score="{score}" data-game-key="{safe_game_key}">{score:,}</span>{pop_html}
+    </div>
   </div>
   <div class="lexi-chip">
     <div class="lexi-chip-label">SORU</div>
@@ -241,6 +279,35 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
 ''',
         unsafe_allow_html=True,
     )
+
+    # Score odometer — tween from previous value to current using rAF.
+    # Game-key check resets the in-flight value across new games so we
+    # don't tween 4200 → 0 between games.
+    odometer_js = (
+        'var w=window.parent;'
+        'var n=d.querySelector(".lexi-score-num");'
+        'if(!n)return;'
+        'var target=parseInt(n.getAttribute("data-score"),10);'
+        'var gk=n.getAttribute("data-game-key")||"";'
+        'var lastKey=w.__lexiScoreGameKey;'
+        'var current=(lastKey===gk && typeof w.__lexiLastScore==="number")?w.__lexiLastScore:target;'
+        'w.__lexiScoreGameKey=gk;'
+        'function fmt(v){return v.toLocaleString("tr-TR");}'
+        'if(current===target){n.textContent=fmt(target);w.__lexiLastScore=target;return;}'
+        'if(w.__lexiScoreRaf){cancelAnimationFrame(w.__lexiScoreRaf);}'
+        'var start=performance.now(),dur=600,from=current;'
+        'function tick(now){'
+          'var t=Math.min(1,(now-start)/dur);'
+          'var e=1-Math.pow(1-t,3);'
+          'var v=Math.round(from+(target-from)*e);'
+          'n.textContent=fmt(v);'
+          'w.__lexiLastScore=v;'
+          'if(t<1){w.__lexiScoreRaf=requestAnimationFrame(tick);}'
+          'else{w.__lexiLastScore=target;w.__lexiScoreRaf=null;}'
+        '}'
+        'w.__lexiScoreRaf=requestAnimationFrame(tick);'
+    )
+    _inject_parent_js(odometer_js)
 
     # JS state is stored on window.parent so it survives the per-rerun
     # iframe recreation. The element it paints into (#lexi-global-timer)
@@ -434,6 +501,58 @@ def release_chat_input_focus(st):
     """Stop focus persistence — call from screens with no chat input
     (home, end, history) so the observer doesn't refocus a stale element."""
     _inject_parent_js('window.parent.__lexiFocusActive=false;')
+
+
+@contextmanager
+def typing_indicator(st, label: str = "SUNUCU KONUŞUYOR"):
+    """Render a 3-dot animated indicator while a slow operation runs.
+
+    Replaces st.spinner for in-game host turns so the visual matches the
+    studio palette (amber dots in a teal-bordered card) instead of
+    Streamlit's generic gray spinner. Use as a context manager:
+
+        with typing_indicator(st):
+            reply = host.llm_host_reply(...)
+    """
+    placeholder = st.empty()
+    placeholder.markdown(
+        f'<div class="lexi-typing">'
+        f'<span>{html_lib.escape(label)}</span>'
+        f'<span class="lexi-typing-dots">'
+        f'<span class="lexi-typing-dot"></span>'
+        f'<span class="lexi-typing-dot"></span>'
+        f'<span class="lexi-typing-dot"></span>'
+        f'</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    try:
+        yield
+    finally:
+        placeholder.empty()
+
+
+def mark_fresh_chat_messages(st):
+    """Mark just-rendered chat messages with .lexi-fresh so only the
+    new ones animate in. Compares DOM count to the previous count
+    stashed on window.parent; the last (count - last) messages get the
+    class. Resets when count drops (new round, navigation back to
+    arena).
+
+    Call this once at the end of each phase that renders chat.
+    """
+    js = (
+        'var w=window.parent;'
+        'var msgs=d.querySelectorAll(\'[data-testid="stChatMessage"]\');'
+        'var count=msgs.length;'
+        'var last=(typeof w.__lexiChatLast==="number")?w.__lexiChatLast:0;'
+        'if(count<last)last=0;'
+        'if(count>last){'
+          'for(var i=last;i<count;i++){msgs[i].classList.add("lexi-fresh");}'
+        '}'
+        'w.__lexiChatLast=count;'
+    )
+    _inject_parent_js(js)
 
 
 def host_bubble_with_audio_hook(st, text: str, audio_url: str | None = None):

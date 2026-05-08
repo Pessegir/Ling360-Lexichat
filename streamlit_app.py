@@ -10,6 +10,8 @@ Run with:
 """
 from __future__ import annotations
 
+import time
+
 import streamlit as st
 
 try:
@@ -332,6 +334,9 @@ def render_loading():
     st.session_state.wordnet = resources["wordnet"]
     st.session_state.chat_log = []
     st.session_state._next_reveal_at = None
+    # Stable per-game key — drives JS state resets (score odometer, etc.)
+    # across game boundaries so we don't tween 4200 → 0 between games.
+    st.session_state.game_key = f"g{int(time.time() * 1000)}"
     # Clear any leftover end-of-game flags from a previous run so this
     # game's end-screen will save its row.
     st.session_state.score_saved_id = None

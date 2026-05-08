@@ -30,7 +30,8 @@ from game.round import (
 )
 from ui.components import (
     answer_timer, clue_card, focus_chat_input, host_bubble, info_chips,
-    tile_board, topbar, wordmark,
+    mark_fresh_chat_messages, tile_board, topbar, typing_indicator,
+    wordmark,
 )
 
 
@@ -809,7 +810,7 @@ def render_arena(st):
     if line:
         # Show a spinner during processing so even slow paths (LLM call)
         # feel intentional rather than frozen.
-        with st.spinner("Sunucu düşünüyor..."):
+        with typing_indicator(st):
             _handle_input(st, line)
         # If _handle_input transitioned us out of playing (bb → answering,
         # or end), force one rerun so the new phase renders. Otherwise let
@@ -832,6 +833,7 @@ def render_arena(st):
     word = round_ctx["word"]
 
     # === Header ===
+    game_key = st.session_state.get("game_key", "")
     wordmark(st, level="h3")
     topbar(
         st,
@@ -842,10 +844,12 @@ def render_arena(st):
         in_answer_mode=False,
         live=True,  # JS animates the countdown between reruns
         pop=_consume_score_pop(st),
+        game_key=game_key,
     )
 
     # === Letter board ===
-    tile_board(st, word, state.revealed_letters)
+    tile_board(st, word, state.revealed_letters,
+               board_key=f"{game_key}:{round_idx}:{word}")
 
     # === Revealed-info chips (TÜR / YAPI / KÖKEN / BİRLEŞİK) ===
     info_chips(st, st.session_state.get("revealed_info", {}))
@@ -884,6 +888,10 @@ def _render_chat(st):
             else:
                 with st.chat_message("user"):
                     st.write(text)
+    # Mark the last-N just-rendered messages with .lexi-fresh so only
+    # newly-added bubbles slide-fade in. Compares DOM count to the
+    # previous count stashed on window.parent.
+    mark_fresh_chat_messages(st)
 
 
 def render_answering(st):
@@ -925,7 +933,7 @@ def render_answering(st):
     )
     focus_chat_input(st)
     if line:
-        with st.spinner("Sunucu düşünüyor..."):
+        with typing_indicator(st):
             _handle_input(st, line, in_answer_mode=True)
         # If the round ended (correct answer), force a rerun so the new
         # phase renders. Otherwise let the natural script-end finish —
@@ -946,6 +954,7 @@ def render_answering(st):
     word = round_ctx["word"]
 
     # === Header ===
+    game_key = st.session_state.get("game_key", "")
     wordmark(st, level="h3")
     topbar(
         st,
@@ -957,6 +966,7 @@ def render_answering(st):
         seconds_remaining=int(state.total_time),
         in_answer_mode=True,
         pop=_consume_score_pop(st),
+        game_key=game_key,
     )
 
     # === Big answer-phase timer pill (JS-animated) ===
@@ -976,7 +986,8 @@ def render_answering(st):
     )
 
     # === Letter board (frozen — no more letter requests during bb) ===
-    tile_board(st, word, state.revealed_letters)
+    tile_board(st, word, state.revealed_letters,
+               board_key=f"{game_key}:{round_idx}:{word}")
 
     # === Revealed-info chips ===
     info_chips(st, st.session_state.get("revealed_info", {}))
@@ -1035,7 +1046,7 @@ def render_prologue(st):
         # Otherwise — keep chatting. Append to the LLM history and reply.
         messages = st.session_state.prologue_messages or []
         messages.append({"role": "user", "content": line})
-        with st.spinner("Sunucu düşünüyor..."):
+        with typing_indicator(st):
             try:
                 reply = host.prologue_reply(st.session_state.llm, messages)
             except Exception:
@@ -1168,6 +1179,7 @@ def render_between(st):
         in_answer_mode=False,
         live=False,  # global timer is paused-ish during transition
         pop=_consume_score_pop(st),
+        game_key=st.session_state.get("game_key", ""),
     )
 
     # === Chat ===

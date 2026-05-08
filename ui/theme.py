@@ -397,6 +397,19 @@ hr {{
     box-shadow: 0 0 16px rgba(245, 199, 106, 0.25);
 }}
 
+/* Tile flip-on-reveal — JS adds .lexi-flip the moment a tile transitions
+   from blank to revealed (per-board dedup in window.parent), so the
+   animation never re-fires for already-revealed tiles on autorefresh. */
+.lexi-tile.revealed.lexi-flip {{
+    animation: lexi-tile-flip 540ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}}
+
+@keyframes lexi-tile-flip {{
+    0%   {{ transform: rotate(45deg) scale(0.6); box-shadow: 0 0 0 rgba(245, 199, 106, 0); }}
+    55%  {{ transform: rotate(45deg) scale(1.18); box-shadow: 0 0 32px rgba(245, 199, 106, 0.75); }}
+    100% {{ transform: rotate(45deg) scale(1.0);  box-shadow: 0 0 16px rgba(245, 199, 106, 0.25); }}
+}}
+
 .lexi-tile span {{
     transform: rotate(-45deg);
     font-family: {FONT_HEADING};
@@ -934,6 +947,68 @@ hr {{
         width: 28px;
         height: 28px;
     }}
+}}
+
+/* === Chat bubble entry animation ===
+   JS marks new (last-N) chat messages with .lexi-fresh on each rerun,
+   so only freshly-added bubbles slide-fade in. Older bubbles re-render
+   without the class and don't re-animate. */
+[data-testid="stChatMessage"].lexi-fresh {{
+    animation: lexi-bubble-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}}
+
+@keyframes lexi-bubble-in {{
+    from {{ opacity: 0; transform: translateY(8px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+}}
+
+/* === Score odometer wrapper ===
+   The score number lives in a <span> so JS can swap its textContent
+   during the rAF tween without rebuilding the parent chip. */
+.lexi-score-num {{
+    display: inline-block;
+    font-variant-numeric: tabular-nums;
+}}
+
+/* === Typing indicator (replaces st.spinner during host turns) === */
+.lexi-typing {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5rem 0.85rem;
+    margin: 0.4rem 0;
+    background: {SURFACE};
+    border-left: 3px solid {TEAL};
+    border-radius: 4px;
+    color: {TEXT_DIM};
+    font-family: {FONT_HEADING};
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    width: max-content;
+    max-width: 60%;
+}}
+
+.lexi-typing .lexi-typing-dots {{
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 0.5rem;
+}}
+
+.lexi-typing .lexi-typing-dot {{
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: {ACCENT};
+    animation: lexi-typing-bounce 1.1s ease-in-out infinite;
+}}
+
+.lexi-typing .lexi-typing-dot:nth-child(2) {{ animation-delay: 0.15s; }}
+.lexi-typing .lexi-typing-dot:nth-child(3) {{ animation-delay: 0.30s; }}
+
+@keyframes lexi-typing-bounce {{
+    0%, 65%, 100% {{ opacity: 0.3; transform: scale(0.7); }}
+    30%           {{ opacity: 1.0; transform: scale(1.0); }}
 }}
 </style>
 """
