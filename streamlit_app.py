@@ -23,7 +23,9 @@ from game import host
 from game.config import APP_NAME, APP_TAGLINE, TOTAL_GAME_TIME, TOTAL_ROUNDS
 from game.session import build_new_game, load_static_resources
 from game.state import GameState
-from llm_client import LLMError, GeminiClient
+from llm_client import (
+    DeepseekClient, GeminiClient, HuggingFaceClient, LLMError, OpenRouterClient,
+)
 from ui import theme
 from ui.arena import render_arena, render_answering, render_between, render_prologue
 from ui.components import host_bubble, release_chat_input_focus, wordmark
@@ -53,8 +55,14 @@ DEFAULTS = {
     "phase": "home",          # home / loading / prologue / playing / answering / between / end / history
     "player_name": "",
     "player_address": "bey",  # hanım / bey
-    "api_key": "",
-    "provider": "demo",       # demo / gemini / huggingface (later)
+    "api_key": "",            # legacy single-key field (migrated into provider_keys["gemini"])
+    "provider": "demo",       # demo / gemini / deepseek / huggingface / openrouter
+    "provider_keys": {        # per-provider key storage so swapping providers doesn't lose keys
+        "gemini": "",
+        "deepseek": "",
+        "huggingface": "",
+        "openrouter": "",
+    },
     "difficulty": "normal",
     "game_state": None,       # GameState instance once a game starts
     "llm": None,
@@ -92,10 +100,36 @@ DEFAULTS = {
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
+# One-shot migration: if a legacy single api_key was set in an earlier
+# session and provider_keys is still empty, copy it into the gemini slot.
+_legacy_api_key = st.session_state.get("api_key", "")
+if _legacy_api_key and not st.session_state.provider_keys.get("gemini"):
+    st.session_state.provider_keys["gemini"] = _legacy_api_key
+    st.session_state.api_key = ""
+
 
 # --------------------------------------------------------------------------
 # Sidebar — always visible
 # --------------------------------------------------------------------------
+
+
+PROVIDER_TABLE = [
+    # (key, label, key_label, placeholder, signup_url, free_caption)
+    ("demo",        "Demo modu (yapay zekâsız)",      None, None, None,
+     "Demo modunda sunucu yalnızca hazır cümleler kullanır."),
+    ("gemini",      "Google Gemini",                  "Gemini API anahtarı", "AIzaSy...",
+     "https://aistudio.google.com/apikey",
+     "Ücretsiz katmanda günde geniş kotalı kullanım."),
+    ("deepseek",    "Deepseek (yeni / hızlı)",        "Deepseek API anahtarı", "sk-...",
+     "https://platform.deepseek.com/api_keys",
+     "Yeni hesaplara 5 milyon token hediye (~285 oyun)."),
+    ("huggingface", "Hugging Face (açık kaynak)",     "Hugging Face token", "hf_...",
+     "https://huggingface.co/settings/tokens",
+     "Aylık ücretsiz krediyle açık kaynak modeller."),
+    ("openrouter",  "OpenRouter (ücretsiz modeller)", "OpenRouter API anahtarı", "sk-or-...",
+     "https://openrouter.ai/keys",
+     "Süresiz ücretsiz modeller — günde ~50 istek limitli."),
+]
 
 
 def render_sidebar():
@@ -105,40 +139,41 @@ def render_sidebar():
         st.markdown("---")
 
         st.markdown("**Yapay zekâ sağlayıcısı**")
-        provider_options = [
-            "Demo modu (yapay zekâsız)",
-            "Google Gemini",
-            "Hugging Face (yakında)",
-        ]
-        provider_keys = ["demo", "gemini", "huggingface"]
-        current_key = st.session_state.provider if st.session_state.provider in provider_keys else "demo"
-        provider_label = st.selectbox(
+
+        provider_keys_order = [row[0] for row in PROVIDER_TABLE]
+        provider_labels = [row[1] for row in PROVIDER_TABLE]
+        current = st.session_state.provider if st.session_state.provider in provider_keys_order else "demo"
+        chosen_label = st.selectbox(
             "Sağlayıcı",
-            options=provider_options,
-            index=provider_keys.index(current_key),
+            options=provider_labels,
+            index=provider_keys_order.index(current),
             label_visibility="collapsed",
         )
-        if provider_label.startswith("Google Gemini"):
-            st.session_state.provider = "gemini"
-        elif provider_label.startswith("Hugging Face"):
-            st.session_state.provider = "huggingface"
-            st.info("Hugging Face desteği yakında eklenecek. Şimdilik Gemini ya da Demo modunu seçin.", icon="ℹ️")
-        else:
-            st.session_state.provider = "demo"
+        st.session_state.provider = provider_keys_order[provider_labels.index(chosen_label)]
 
-        if st.session_state.provider == "gemini":
-            key_input = st.text_input(
-                "Gemini API anahtarı",
-                value=st.session_state.api_key,
+        # Per-provider key input + free-tier caption
+        for key, _label, key_label, placeholder, signup_url, caption in PROVIDER_TABLE:
+            if key != st.session_state.provider:
+                continue
+            if key_label is None:
+                # demo — no key, just the caption
+                st.caption(caption)
+                break
+            current_key = st.session_state.provider_keys.get(key, "")
+            new_val = st.text_input(
+                key_label,
+                value=current_key,
                 type="password",
-                placeholder="AIzaSy...",
-                help="Ücretsiz anahtar: https://aistudio.google.com/apikey",
+                placeholder=placeholder,
+                help=f"Ücretsiz anahtar: {signup_url}" if signup_url else None,
+                key=f"provider_key_input_{key}",
             )
-            st.session_state.api_key = key_input
-            if not key_input:
-                st.caption("🔑 Anahtarınız yalnızca bu tarayıcı oturumunda saklanır.")
-        elif st.session_state.provider == "demo":
-            st.caption("Demo modunda sunucu yalnızca hazır cümleler kullanır. Her saat 1 oyun.")
+            st.session_state.provider_keys[key] = new_val
+            if not new_val:
+                st.caption(f"🔑 {caption}")
+            else:
+                st.caption(caption)
+            break
 
         st.markdown("---")
 
@@ -216,7 +251,11 @@ def render_home():
     st.write("")
 
     can_start = bool(st.session_state.player_name)
-    needs_key = st.session_state.provider == "gemini" and not st.session_state.api_key
+    provider = st.session_state.provider
+    needs_key = (
+        provider != "demo"
+        and not (st.session_state.provider_keys.get(provider) or "").strip()
+    )
     if needs_key:
         can_start = False
 
@@ -228,7 +267,7 @@ def render_home():
     if not st.session_state.player_name:
         st.caption("✏️ Başlamak için isminizi yazın.")
     elif needs_key:
-        st.caption("🔑 Başlamak için Gemini API anahtarınızı sol kenara yapıştırın "
+        st.caption("🔑 Başlamak için API anahtarınızı sol kenara yapıştırın "
                    "ya da Demo moduna geçin.")
 
 
@@ -243,15 +282,29 @@ def _cached_static_resources():
     return load_static_resources()
 
 
+_PROVIDER_CLIENT_CLASSES = {
+    "gemini": GeminiClient,
+    "deepseek": DeepseekClient,
+    "huggingface": HuggingFaceClient,
+    "openrouter": OpenRouterClient,
+}
+
+
 def _make_llm():
-    if st.session_state.provider == "gemini" and st.session_state.api_key:
-        try:
-            return GeminiClient(api_key=st.session_state.api_key)
-        except LLMError as e:
-            st.error(f"Gemini bağlantı hatası: {e}")
-            return None
-    # Demo mode or no key → run scripted-only
-    return None
+    provider = st.session_state.provider
+    if provider == "demo":
+        return None
+    api_key = (st.session_state.provider_keys.get(provider) or "").strip()
+    if not api_key:
+        return None  # Falls back to scripted-only
+    cls = _PROVIDER_CLIENT_CLASSES.get(provider)
+    if cls is None:
+        return None
+    try:
+        return cls(api_key=api_key)
+    except LLMError as e:
+        st.error(f"{provider} bağlantı hatası: {e}")
+        return None
 
 
 def _lights_html(active_step: int, label: str, total_steps: int = 3) -> str:

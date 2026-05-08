@@ -4,6 +4,8 @@ editdistance>=0.8.1
 pandas>=2.0
 zemberek-python>=0.2.3
 NlpToolkit-WordNet>=1.0.24
+# Used by the OpenAI-compatible HTTP clients (Deepseek, HF, OpenRouter)
+requests>=2.31
 # Web app (Phase 4)
 streamlit>=1.36
 streamlit-autorefresh>=1.0.1
