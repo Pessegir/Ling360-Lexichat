@@ -276,10 +276,25 @@ def _lights_html(active_step: int, label: str, total_steps: int = 3) -> str:
     )
 
 
+# Loading-screen flavor lines — host warm-up patter, one per step.
+# Lora-italic in the host bubble. Cycled (not random) so the player
+# gets a sense of progression rather than chaos.
+_WARMUP_LINES = [
+    "Hazırlanıyorum efendim, biraz bekleyin lütfen...",
+    "Sözlüğü açıyorum, kelimeleri seçiyorum...",
+    "Mikrofon kontrol — bir, iki, bir, iki...",
+    "Sahnemiz hazır olmak üzere efendim, son rötuşlar...",
+]
+
+
 def render_loading():
     wordmark(st, level="h2")
     st.write("")
-    host_bubble(st, "Hazırlanıyorum efendim, biraz bekleyin lütfen...")
+    host_slot = st.empty()
+    host_slot.markdown(
+        f'<div class="lexi-host-bubble">{_WARMUP_LINES[0]}</div>',
+        unsafe_allow_html=True,
+    )
     st.write("")
 
     status = st.empty()
@@ -295,12 +310,20 @@ def render_loading():
             st.session_state.phase = "home"
             st.rerun()
         return
+    host_slot.markdown(
+        f'<div class="lexi-host-bubble">{_WARMUP_LINES[1]}</div>',
+        unsafe_allow_html=True,
+    )
     status.markdown(
         _lights_html(1, "Yapay zekâ bağlanıyor..."),
         unsafe_allow_html=True,
     )
 
     llm = _make_llm()
+    host_slot.markdown(
+        f'<div class="lexi-host-bubble">{_WARMUP_LINES[2]}</div>',
+        unsafe_allow_html=True,
+    )
     status.markdown(
         _lights_html(2, "14 kelime seçiliyor..."),
         unsafe_allow_html=True,
@@ -314,6 +337,10 @@ def render_loading():
             st.session_state.phase = "home"
             st.rerun()
         return
+    host_slot.markdown(
+        f'<div class="lexi-host-bubble">{_WARMUP_LINES[3]}</div>',
+        unsafe_allow_html=True,
+    )
     status.markdown(_lights_html(3, "Hazır!"), unsafe_allow_html=True)
 
     # Seed all session state for the game

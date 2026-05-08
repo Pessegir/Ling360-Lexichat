@@ -949,17 +949,122 @@ hr {{
     }}
 }}
 
-/* === Chat bubble entry animation ===
-   JS marks new (last-N) chat messages with .lexi-fresh on each rerun,
-   so only freshly-added bubbles slide-fade in. Older bubbles re-render
-   without the class and don't re-animate. */
-[data-testid="stChatMessage"].lexi-fresh {{
+/* === Custom chat layout — replaces st.chat_message ===
+   Host gets italic Lora + teal stripe + mic avatar; player gets a
+   right-aligned ivory bubble. Container scrolls internally so the
+   topbar/tile board stay anchored. */
+.lexi-chat-scroll {{
+    height: 320px;
+    overflow-y: auto;
+    padding: 0.25rem 0.5rem 0.5rem 0;
+    scrollbar-width: thin;
+    scrollbar-color: {BORDER_BRIGHT} transparent;
+    scroll-behavior: smooth;
+}}
+
+.lexi-chat-scroll::-webkit-scrollbar {{
+    width: 6px;
+}}
+
+.lexi-chat-scroll::-webkit-scrollbar-track {{
+    background: transparent;
+}}
+
+.lexi-chat-scroll::-webkit-scrollbar-thumb {{
+    background: {BORDER_BRIGHT};
+    border-radius: 3px;
+}}
+
+.lexi-chat-row {{
+    display: flex;
+    margin: 0.55rem 0;
+    align-items: flex-start;
+    gap: 0.6rem;
+}}
+
+.lexi-chat-row.lexi-chat-host {{
+    justify-content: flex-start;
+}}
+
+.lexi-chat-row.lexi-chat-user {{
+    justify-content: flex-end;
+}}
+
+.lexi-chat-avatar {{
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: {SURFACE};
+    border: 1px solid {TEAL};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    margin-top: 2px;
+}}
+
+.lexi-chat-bubble {{
+    padding: 0.6rem 0.95rem;
+    line-height: 1.55;
+    max-width: 78%;
+    border-radius: 4px;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+}}
+
+.lexi-chat-host-bubble {{
+    background: {SURFACE};
+    border-left: 3px solid {TEAL};
+    color: {TEXT};
+    font-family: {FONT_HOST};
+    font-style: italic;
+    font-size: 1.0rem;
+}}
+
+.lexi-chat-user-bubble {{
+    background: {SURFACE_HIGH};
+    border: 1px solid {BORDER};
+    color: {TEXT};
+    text-align: left;
+    font-size: 0.97rem;
+}}
+
+.lexi-chat-system {{
+    color: {TEXT_DIM};
+    font-size: 0.85rem;
+    text-align: center;
+    margin: 0.6rem 0;
+    font-family: {FONT_BODY};
+    letter-spacing: 0.02em;
+}}
+
+/* Bubble entry animation — JS marks new rows with .lexi-fresh on each
+   rerun, so only freshly-added bubbles slide-fade in. Older bubbles
+   re-render without the class and don't re-animate. */
+.lexi-fresh {{
     animation: lexi-bubble-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
 }}
 
 @keyframes lexi-bubble-in {{
     from {{ opacity: 0; transform: translateY(8px); }}
     to   {{ opacity: 1; transform: translateY(0); }}
+}}
+
+/* Mobile: smaller avatar, tighter padding */
+@media (max-width: 480px) {{
+    .lexi-chat-bubble {{
+        max-width: 85%;
+        padding: 0.5rem 0.75rem;
+    }}
+    .lexi-chat-avatar {{
+        width: 26px;
+        height: 26px;
+        font-size: 0.8rem;
+    }}
+    .lexi-chat-scroll {{
+        height: 280px;
+    }}
 }}
 
 /* === Score odometer wrapper ===

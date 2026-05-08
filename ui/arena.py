@@ -7,6 +7,7 @@ State machine values used here:
 """
 from __future__ import annotations
 
+import html as html_lib
 import os
 import random
 import time
@@ -866,31 +867,48 @@ def render_arena(st):
 def _render_chat(st):
     """Shared chat-history block used by both playing and answering.
 
-    Skips entries whose reveal_at is in the future — those reveal on a
-    later rerun (driven by the periodic autorefresh in main()).
+    Custom HTML bubbles (not st.chat_message) so we get full styling
+    control: host gets italic Lora + teal stripe + mic avatar, player
+    gets right-aligned ivory. Skips entries whose reveal_at is in the
+    future — those reveal on a later rerun.
+
+    Auto-scrolls to bottom on new messages, but respects the user's
+    manual scroll-up (handled in mark_fresh_chat_messages).
     """
     chat_log = st.session_state.chat_log
     now = time.time()
-    with st.container(height=320, border=False):
-        for entry in chat_log:
-            # Tolerate legacy 2-tuples for safety; reveal them immediately.
-            if len(entry) == 2:
-                role, text = entry
-            else:
-                role, text, reveal_at = entry[0], entry[1], entry[2]
-                if reveal_at > now:
-                    continue
-            if role == "system":
-                st.caption(text)
-            elif role == "assistant":
-                with st.chat_message("assistant", avatar="🎙️"):
-                    st.write(text)
-            else:
-                with st.chat_message("user"):
-                    st.write(text)
-    # Mark the last-N just-rendered messages with .lexi-fresh so only
-    # newly-added bubbles slide-fade in. Compares DOM count to the
-    # previous count stashed on window.parent.
+    pieces = []
+    for entry in chat_log:
+        # Tolerate legacy 2-tuples for safety; reveal them immediately.
+        if len(entry) == 2:
+            role, text = entry
+        else:
+            role, text, reveal_at = entry[0], entry[1], entry[2]
+            if reveal_at > now:
+                continue
+        safe = html_lib.escape(text).replace("\n", "<br>")
+        if role == "system":
+            pieces.append(f'<div class="lexi-chat-system">{safe}</div>')
+        elif role == "assistant":
+            pieces.append(
+                f'<div class="lexi-chat-row lexi-chat-host">'
+                f'<div class="lexi-chat-avatar">🎙️</div>'
+                f'<div class="lexi-chat-bubble lexi-chat-host-bubble">{safe}</div>'
+                f'</div>'
+            )
+        else:
+            pieces.append(
+                f'<div class="lexi-chat-row lexi-chat-user">'
+                f'<div class="lexi-chat-bubble lexi-chat-user-bubble">{safe}</div>'
+                f'</div>'
+            )
+
+    st.markdown(
+        f'<div class="lexi-chat-scroll" id="lexi-chat-scroll">'
+        f'{"".join(pieces)}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
     mark_fresh_chat_messages(st)
 
 

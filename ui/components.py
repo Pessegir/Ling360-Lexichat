@@ -534,23 +534,33 @@ def typing_indicator(st, label: str = "SUNUCU KONUŞUYOR"):
 
 def mark_fresh_chat_messages(st):
     """Mark just-rendered chat messages with .lexi-fresh so only the
-    new ones animate in. Compares DOM count to the previous count
-    stashed on window.parent; the last (count - last) messages get the
-    class. Resets when count drops (new round, navigation back to
-    arena).
+    new ones animate in. Also auto-scrolls the chat container to the
+    bottom on new messages, while respecting the user's manual
+    scroll-up (don't yank them around if they're reading history).
 
-    Call this once at the end of each phase that renders chat.
+    Compares DOM count to the previous count stashed on window.parent;
+    the last (count - last) messages get the .lexi-fresh class. Resets
+    when count drops (new round, navigation back to arena).
     """
     js = (
         'var w=window.parent;'
-        'var msgs=d.querySelectorAll(\'[data-testid="stChatMessage"]\');'
+        'var msgs=d.querySelectorAll(".lexi-chat-row,.lexi-chat-system");'
         'var count=msgs.length;'
         'var last=(typeof w.__lexiChatLast==="number")?w.__lexiChatLast:0;'
         'if(count<last)last=0;'
-        'if(count>last){'
+        'var newCount=count-last;'
+        'if(newCount>0){'
           'for(var i=last;i<count;i++){msgs[i].classList.add("lexi-fresh");}'
         '}'
         'w.__lexiChatLast=count;'
+        # Auto-scroll: if user is at bottom OR new messages arrived,
+        # snap to bottom. If they scrolled up to read history and
+        # nothing new came in, leave them alone.
+        'var sc=d.getElementById("lexi-chat-scroll");'
+        'if(sc){'
+          'var atBottom=(sc.scrollHeight - sc.scrollTop - sc.clientHeight) < 80;'
+          'if(atBottom || newCount > 0){sc.scrollTop=sc.scrollHeight;}'
+        '}'
     )
     _inject_parent_js(js)
 
