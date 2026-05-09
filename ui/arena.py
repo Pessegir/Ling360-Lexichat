@@ -495,6 +495,12 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
             _, status = letter_request(word, state.revealed_letters)
             if status != "all-revealed":
                 state.hints_used += 1
+                # Direct play, NOT queue — letter-request stays in the
+                # same render (no st.rerun), so the sound iframe lives
+                # alongside the tile-board iframe and fires immediately.
+                # Queue would delay this by one input, which felt
+                # "alternating" (every other 'h' triggered the previous).
+                sound.play(st, "tile-reveal")
             # End the round when the LAST blank gets revealed (matches
             # legacy: it reveals the letter, then checks if any blanks
             # remain). status=="all-revealed" only fires when called with

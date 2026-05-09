@@ -234,7 +234,7 @@ def render_home():
         name = st.text_input(
             "İsminiz",
             value=st.session_state.player_name,
-            placeholder="Nurullah",
+            placeholder="İsim",
             help="Skorlarınızı bu isim altında saklayacağız.",
         )
     with col2:

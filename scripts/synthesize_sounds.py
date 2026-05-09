@@ -89,8 +89,20 @@ def lowpass(s: np.ndarray, cutoff_hz: float) -> np.ndarray:
 
 
 def make_tile_reveal() -> np.ndarray:
-    # Soft warm pop on letter reveal
-    return sine(820, 90, amp=0.45, release_ms=75)
+    # Wooden tile tap — body sine + bright pluck overtone + tiny noise
+    # transient, so it cuts through the score-down chime that fires
+    # alongside on letter requests.
+    n = int(140 * SR / 1000)
+    t = np.arange(n) / SR
+    body = 0.55 * np.sin(2 * np.pi * 760 * t)
+    # Bright pluck on top, only the first 60 ms
+    pluck_n = int(60 * SR / 1000)
+    body[:pluck_n] += 0.28 * np.sin(2 * np.pi * 2300 * np.arange(pluck_n) / SR)
+    # Initial transient — 3 ms of noise to give it a "tap" character
+    rng = np.random.default_rng(11)
+    trans_n = int(4 * SR / 1000)
+    body[:trans_n] += 0.40 * rng.standard_normal(trans_n)
+    return body * envelope(n, attack_ms=1, release_ms=120)
 
 
 def make_correct() -> np.ndarray:
@@ -158,6 +170,16 @@ def make_new_record() -> np.ndarray:
     return a + b + c
 
 
+def make_click() -> np.ndarray:
+    # UI click — short bright tap for buttons / toggles.
+    n = int(45 * SR / 1000)
+    rng = np.random.default_rng(99)
+    s = 0.35 * rng.standard_normal(n)
+    s += 0.45 * np.sin(2 * np.pi * 1800 * np.arange(n) / SR)
+    s = lowpass(s, 5500)
+    return s * envelope(n, attack_ms=1, release_ms=30)
+
+
 SOUNDS = {
     "tile-reveal": make_tile_reveal,
     "correct":     make_correct,
@@ -168,6 +190,7 @@ SOUNDS = {
     "game-start":  make_game_start,
     "game-end":    make_game_end,
     "new-record":  make_new_record,
+    "click":       make_click,
 }
 
 

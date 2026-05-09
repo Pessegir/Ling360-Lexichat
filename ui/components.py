@@ -148,7 +148,10 @@ def tile_board(st, word_or_length, revealed_letters=None, *, board_key: str = ""
               'seen[i]=isRev;'
             '});'
             'w.__lexiTileSeen[key]=seen;'
-            'if(anyNew && w.lexi && w.lexi.play){w.lexi.play("tile-reveal");}'
+            # Sound is queued from Python (sound.queue("tile-reveal") in
+            # arena.py letter-request branch) — more reliable than this
+            # JS path, which races the components.html iframe lifecycle.
+            # Keep the dedup loop only for the visual flip animation.
         )
         _inject_parent_js(js)
 

@@ -128,10 +128,40 @@ def stylesheet() -> str:
     display: none !important;
 }}
 
-/* Hide Streamlit's default chrome */
-#MainMenu, footer, header[data-testid="stHeader"] {{
+/* Hide Streamlit's hamburger menu and footer, but KEEP the header
+   visible — it contains the sidebar collapse/expand button. We just
+   make the header background transparent so it blends into our shell. */
+#MainMenu, footer {{
     visibility: hidden;
     height: 0;
+}}
+
+header[data-testid="stHeader"] {{
+    background: transparent !important;
+}}
+
+/* Make all header content (incl. sidebar collapse/expand toggle and
+   the floating "open sidebar" button when collapsed) visible against
+   our dark background. Without this the icons inherit Streamlit's
+   default dark color and disappear. */
+header[data-testid="stHeader"] button,
+header[data-testid="stHeader"] svg,
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarCollapsedControl"] button,
+[data-testid="stSidebarCollapsedControl"] svg,
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stSidebarCollapseButton"] svg {{
+    color: {TEXT} !important;
+    fill: currentColor !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}}
+
+header[data-testid="stHeader"] button:hover,
+[data-testid="stSidebarCollapsedControl"] button:hover,
+[data-testid="stSidebarCollapseButton"] button:hover {{
+    background: rgba(245, 199, 106, 0.12) !important;
+    color: {ACCENT} !important;
 }}
 
 /* Tighter top padding now that the header is hidden */
