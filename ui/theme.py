@@ -1120,5 +1120,14 @@ hr {{
 
 
 def inject(st):
-    """Call once at the top of every Streamlit page to apply the theme."""
+    """Call once at the top of every Streamlit page to apply the theme.
+
+    Also primes the sound engine (idempotent — only does work on first
+    page load). Sounds rely on Streamlit's static file serving (see
+    .streamlit/config.toml).
+    """
     st.markdown(stylesheet(), unsafe_allow_html=True)
+    # Lazy import to avoid circular (sound imports from components, which
+    # is also referenced elsewhere in theme.inject's call sites).
+    from ui.sound import inject_sound_engine
+    inject_sound_engine(st)

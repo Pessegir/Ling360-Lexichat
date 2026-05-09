@@ -10,6 +10,7 @@ import html as html_lib
 from game.config import TOTAL_GAME_TIME, TOTAL_ROUNDS
 from game.round import end_game_lines
 from game.scores import best_score, save_game
+from ui import sound
 from ui.components import host_bubble, release_chat_input_focus, wordmark
 
 
@@ -87,6 +88,10 @@ def _persist_game(st, state) -> None:
 def render_end(st):
     state = st.session_state.game_state
 
+    # Flush any sound queued during the transition into end (e.g., a
+    # final 'wrong' from timeout on the last round).
+    sound.flush(st)
+
     release_chat_input_focus(st)
     wordmark(st, level="h2")
     st.write("")
@@ -144,6 +149,14 @@ def render_end(st):
 ''',
         unsafe_allow_html=True,
     )
+
+    # Fire the end-screen sound bank exactly once per game, on first
+    # render after entering the end phase. Reset by render_loading.
+    if not st.session_state.get("end_sounds_fired"):
+        sound.play(st, "game-end")
+        if is_record:
+            sound.play(st, "new-record")
+        st.session_state.end_sounds_fired = True
 
     time_str = _format_time_taken(state)
     st.markdown(

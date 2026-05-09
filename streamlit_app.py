@@ -31,6 +31,7 @@ from ui.arena import render_arena, render_answering, render_between, render_prol
 from ui.components import host_bubble, release_chat_input_focus, wordmark
 from ui.end import render_end
 from ui.history import render_history
+from ui import sound
 
 
 # --------------------------------------------------------------------------
@@ -64,6 +65,7 @@ DEFAULTS = {
         "openrouter": "",
     },
     "difficulty": "normal",
+    "sound_enabled": True,    # mute toggle in the sidebar
     "game_state": None,       # GameState instance once a game starts
     "llm": None,
     "word_list": None,
@@ -185,6 +187,16 @@ def render_sidebar():
             label_visibility="collapsed",
             help="Diğer zorluk seviyeleri yakında (Phase 2'de açılacak).",
         )
+
+        st.markdown("---")
+
+        sound_on = st.toggle(
+            "🔊 Sesler",
+            value=st.session_state.sound_enabled,
+            help="Tile, doğru/yanlış cevap, oyun sonu sesleri.",
+        )
+        st.session_state.sound_enabled = sound_on
+        sound.set_muted(st, not sound_on)
 
         st.markdown("---")
 
@@ -418,9 +430,11 @@ def render_loading():
     # across game boundaries so we don't tween 4200 → 0 between games.
     st.session_state.game_key = f"g{int(time.time() * 1000)}"
     # Clear any leftover end-of-game flags from a previous run so this
-    # game's end-screen will save its row.
+    # game's end-screen will save its row + fire celebration sounds.
     st.session_state.score_saved_id = None
+    st.session_state.end_sounds_fired = False
     st.session_state.history_clear_confirm = False
+    st.session_state._pending_sounds = []
 
     # Open the prologue: greeting + LLM (or scripted) opener.
     from ui.arena import _say

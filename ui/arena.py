@@ -29,6 +29,7 @@ from game.round import (
     react_to_guess, repetition_nudge, round_timeout_lines,
     score_for_correct_answer,
 )
+from ui import sound
 from ui.components import (
     answer_timer, clue_card, focus_chat_input, host_bubble, info_chips,
     mark_fresh_chat_messages, tile_board, topbar, typing_indicator,
@@ -279,6 +280,8 @@ def _start_round(st, round_idx: int):
     """Initialize state for round `round_idx`. Resets revealed letters,
     chat log scoped to this round, hint chance list, silence baselines.
     """
+    if round_idx == 0:
+        sound.queue(st, "game-start")
     state = st.session_state.game_state
     word_list = st.session_state.word_list
     word = word_list[round_idx]
@@ -384,6 +387,7 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
         if in_answer_mode:
             # Correct! End the round — celebration + score + advance.
             branch_taken = "answer-correct"
+            sound.queue(st, "correct")
             # Stash the points we'll award so the renderer can play a
             # +N pop animation when the celebration line is revealed.
             round_score = score_for_correct_answer(word, state.revealed_letters)
@@ -759,6 +763,7 @@ def _handle_answering_timeout(st):
     revealed at timeout and SUBTRACTED from total_score. Harsh on purpose —
     pressing bb is a commitment.
     """
+    sound.queue(st, "wrong")
     state = st.session_state.game_state
     word = st.session_state.round_ctx["word"]
 
@@ -788,6 +793,7 @@ def _handle_answering_timeout(st):
 
 
 def render_arena(st):
+    sound.flush(st)
     state = st.session_state.game_state
 
     # Tick the global timer first — this might end the game
@@ -921,6 +927,7 @@ def render_answering(st):
     ticker in `answer_timer` only animates the displayed digits between
     reruns; truth always comes from the server.
     """
+    sound.flush(st)
     state = st.session_state.game_state
 
     # Defensive: if we somehow got here without a deadline set, fall back
@@ -1118,6 +1125,7 @@ def render_between(st):
     if it gets eaten, which is essentially never anyway with a 1-s
     interval and no spinner).
     """
+    sound.flush(st)
     state = st.session_state.game_state
     bs = st.session_state.between_state or {}
     next_idx = bs.get("next_idx", st.session_state.round_idx + 1)

@@ -1,0 +1,4 @@
+[server]
+# Serve files from ./static/ at <host>/app/static/<path>. Used by the
+# sound engine to deliver pre-rendered WAV samples to the browser.
+enableStaticServing = true

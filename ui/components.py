@@ -138,12 +138,17 @@ def tile_board(st, word_or_length, revealed_letters=None, *, board_key: str = ""
             'w.__lexiTileSeen=w.__lexiTileSeen||{};'
             'var seen=w.__lexiTileSeen[key]||{};'
             'var tiles=board.querySelectorAll(".lexi-tile");'
+            # Track whether THIS render newly revealed any tile so we
+            # only fire the reveal sound once per real reveal (not per
+            # tile, in case multiple flip at once).
+            'var anyNew=false;'
             'tiles.forEach(function(t,i){'
               'var isRev=t.classList.contains("revealed");'
-              'if(isRev && !seen[i]){t.classList.add("lexi-flip");}'
+              'if(isRev && !seen[i]){t.classList.add("lexi-flip");anyNew=true;}'
               'seen[i]=isRev;'
             '});'
             'w.__lexiTileSeen[key]=seen;'
+            'if(anyNew && w.lexi && w.lexi.play){w.lexi.play("tile-reveal");}'
         )
         _inject_parent_js(js)
 
@@ -294,6 +299,9 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
         'w.__lexiScoreGameKey=gk;'
         'function fmt(v){return v.toLocaleString("tr-TR");}'
         'if(current===target){n.textContent=fmt(target);w.__lexiLastScore=target;return;}'
+        # Sound on score change — only when we actually have a delta to
+        # tween (not on first render of a fresh game, where current===target).
+        'if(w.lexi && w.lexi.play){w.lexi.play(target>current?"score-up":"score-down");}'
         'if(w.__lexiScoreRaf){cancelAnimationFrame(w.__lexiScoreRaf);}'
         'var start=performance.now(),dur=600,from=current;'
         'function tick(now){'
@@ -409,6 +417,8 @@ def answer_timer(st, *, seconds_remaining: float, total_seconds: int = 45,
         'w.__lexiAnswerTimer=setInterval(function(){'
           'remaining=Math.max(0,remaining-1);'
           'w.__lexiAnswerJsSecs=remaining;'
+          # Soft tick during the last 10 seconds — quietly urgent.
+          'if(remaining>0 && remaining<=10 && w.lexi && w.lexi.play){w.lexi.play("timer-tick");}'
           'if(!paint()||remaining<=0){clearInterval(w.__lexiAnswerTimer);w.__lexiAnswerTimer=null;}'
         '},1000);'
     )
