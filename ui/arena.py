@@ -31,9 +31,9 @@ from game.round import (
 )
 from ui import sound
 from ui.components import (
-    answer_timer, clue_card, focus_chat_input, host_bubble, info_chips,
-    mark_fresh_chat_messages, tile_board, topbar, typing_indicator,
-    wordmark,
+    _inject_parent_js, answer_timer, clue_card, focus_chat_input,
+    host_bubble, info_chips, mark_fresh_chat_messages, tile_board,
+    topbar, typing_indicator, wordmark,
 )
 
 
@@ -1122,20 +1122,52 @@ def render_between(st):
       wait — host asks; waits for player to type 'devam' / 'hadi' / etc.
              Idle 10 s → host says "Devam edelim hadi" and auto-advances.
 
-    We use a 1-s autorefresh ONLY in the auto branch (so the timer
-    actually fires) and the wait branch falls back to a 1-s autorefresh
-    too once we're waiting on the idle nudge. Autorefresh in `between`
-    is safe — there's no critical-input race like in playing where
-    a stray rerun would drop a chat submission, because the only
-    keyword we listen for is 'devam' (the player can re-type it
-    if it gets eaten, which is essentially never anyway with a 1-s
-    interval and no spinner).
+    Timer mechanism: a hidden Streamlit button that JS clicks at the
+    next deadline via setTimeout. Replaces the old 1.5 s autorefresh,
+    which raced chat_input submissions and occasionally dropped a typed
+    'devam'. The button click routes through Streamlit's normal event
+    channel, same as chat_input — they no longer compete.
     """
     sound.flush(st)
     state = st.session_state.game_state
     bs = st.session_state.between_state or {}
     next_idx = bs.get("next_idx", st.session_state.round_idx + 1)
     mode = bs.get("mode", "auto")
+
+    # === Hidden timer button + JS setTimeout ===
+    # Marker span comes first so the CSS sibling selector (in theme.py)
+    # can hide the following element container — the button itself.
+    # Button label is unusual so it can't collide with real UI text.
+    st.markdown(
+        '<span class="lexi-between-tick-marker"></span>',
+        unsafe_allow_html=True,
+    )
+    st.button("__lexi_between_tick__", key="lexi_between_tick")
+
+    # Figure out the earliest pending deadline (auto-advance or idle-nudge).
+    now = time.time()
+    deadlines = []
+    if bs.get("auto_advance_at") is not None:
+        deadlines.append(bs["auto_advance_at"])
+    if mode == "wait" and bs.get("idle_nudge_at") is not None and not bs.get("nudged"):
+        deadlines.append(bs["idle_nudge_at"])
+    next_deadline = min(deadlines) if deadlines else None
+
+    if next_deadline is not None:
+        ms = max(50, int((next_deadline - now) * 1000) + 80)
+        js = (
+            'var btn=null;'
+            'var bts=d.querySelectorAll(\'.stButton button, button\');'
+            'bts.forEach(function(b){'
+              'if(b.textContent && b.textContent.indexOf("__lexi_between_tick__")>=0){btn=b;}'
+            '});'
+            'if(btn){'
+              # Clear any prior pending click so we don't fire-on-stale-deadline
+              'if(w.__lexiBetweenTimer){clearTimeout(w.__lexiBetweenTimer);}'
+              f'w.__lexiBetweenTimer=setTimeout(function(){{try{{btn.click();}}catch(e){{}}}},{ms});'
+            '}'
+        )
+        _inject_parent_js(js)
 
     # === Player input FIRST ===
     # Read chat_input before the timer checks so a typed 'devam' is

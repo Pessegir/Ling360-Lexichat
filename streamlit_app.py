@@ -486,26 +486,16 @@ def main():
     # 45-s server deadline fires even if the player goes idle. Playing
     # phase has NO autorefresh — the previous "chat reveal" autorefresh
     # at 700 ms raced st.chat_input submissions and made the game feel
-    # broken ("can type but can't send"). Staggered chat reveals are
-    # instead handled by reveal-on-next-rerun, which is good enough
-    # since the player is naturally interacting; pure-idle reveal can
-    # come back later if we drive it from JS instead of autorefresh.
+    # broken ("can type but can't send"). The between phase used to have
+    # a 1.5 s autorefresh that occasionally dropped 'devam' submissions
+    # under the same race; it's now replaced by a hidden-button +
+    # JS setTimeout pattern inside render_between (ui/arena.py).
     if st_autorefresh is not None:
         phase = st.session_state.phase
         if phase == "answering":
             # 3 s avoids racing st.chat_input submissions while still
             # firing the 45-s server timeout.
             st_autorefresh(interval=3000, key="answer_phase_tick")
-        elif phase == "between":
-            # Auto-advance + idle-nudge timing both need ticks. We use
-            # 1.5 s here as a compromise: tight enough that the 2-4 s
-            # auto-advance feels prompt, loose enough that an in-flight
-            # st.chat_input submission (e.g. user typing 'devam') isn't
-            # raced and dropped. Submissions are processed BEFORE the
-            # auto-advance check in render_between, so even if the
-            # deadline has passed by the time we paint, a typed 'devam'
-            # wins and we continue cleanly into the next round.
-            st_autorefresh(interval=1500, key="between_phase_tick")
 
     renderer = PHASE_RENDERERS.get(st.session_state.phase, render_home)
     renderer()

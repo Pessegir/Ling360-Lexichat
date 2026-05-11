@@ -14,7 +14,17 @@ preloaded Audio on the first click anywhere — belt-and-suspenders.
 """
 from __future__ import annotations
 
+import itertools
+
 from ui.components import _inject_parent_js
+
+
+# Monotonic counter — appended as a comment to every play() JS payload
+# so back-to-back calls with the same sound name produce *different*
+# strings. Streamlit dedupes components.html iframes by exact content;
+# without this, repeated sound.play("tile-reveal") would only fire the
+# first time per render position (e.g. consecutive 'h' letter requests).
+_play_nonce = itertools.count()
 
 
 SOUND_FILES = [
@@ -146,8 +156,9 @@ def play(st, name: str):
     so calling play() right before st.rerun() can swallow the sound.
     For sounds that fire during phase transitions, use queue() instead.
     """
+    n = next(_play_nonce)
     _inject_parent_js(_target_js(
-        f'try{{if(w.lexi&&w.lexi.play)w.lexi.play("{name}");}}catch(e){{console.warn("[lexi sound] play({name!r}) failed:",e);}}'
+        f'try{{if(w.lexi&&w.lexi.play)w.lexi.play("{name}");}}catch(e){{console.warn("[lexi sound] play({name!r}) failed:",e);}}/*n{n}*/'
     ))
 
 
