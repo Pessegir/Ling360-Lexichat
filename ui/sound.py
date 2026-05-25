@@ -28,11 +28,21 @@ _play_nonce = itertools.count()
 
 
 SOUND_FILES = [
+    # One-shot SFX
     "tile-reveal", "correct", "wrong",
     "score-up", "score-down", "timer-tick",
     "game-start", "game-end", "new-record",
-    "click",
+    "click", "bb",
+    # Looping background tracks — same fetch/decode path, played via
+    # lexi.setBg() instead of lexi.play().
+    "background_main", "bg_main", "bg_afterbb", "tension",
 ]
+
+# Background tracks crossfade in the JS engine when phase changes. Volume
+# sits well under SFX so spoken host lines and event sounds stay primary.
+BG_DEFAULT_VOLUME = 0.10
+BG_DEFAULT_FADE_MS = 400
+
 BASE_URL = "/app/static/sounds/"
 
 
@@ -68,7 +78,73 @@ def inject_sound_engine(st):
           'w.lexi.ctx=new Ctx();'
           'w.lexi.buffers={};'
           'if(typeof w.lexi.muted!=="boolean"){w.lexi.muted=false;}'
+          'if(typeof w.lexi.bgmuted!=="boolean"){w.lexi.bgmuted=false;}'
           'w.lexi.volume=0.55;'
+          f'w.lexi.bgvolume={BG_DEFAULT_VOLUME};'
+          'w.lexi.currentBg=null;'   # {source, gain, name} of the playing bg
+          'w.lexi.pendingBg=null;'   # set when setBg called pre-resume
+          # Looping background tracks. Crossfade between them on phase change.
+          'w.lexi._startBg=function(name,fadeMs){'
+            'var buf=this.buffers[name];'
+            'if(!buf){console.warn("[lexi sound] no bg buffer for",name);return;}'
+            'var ctx=this.ctx;'
+            'var src=ctx.createBufferSource();'
+            'src.buffer=buf;src.loop=true;'
+            'var gain=ctx.createGain();'
+            'gain.gain.value=0;'
+            'src.connect(gain).connect(ctx.destination);'
+            'src.start();'
+            'var target=this.bgmuted?0:this.bgvolume;'
+            'gain.gain.linearRampToValueAtTime(target,ctx.currentTime+fadeMs/1000);'
+            'this.currentBg={source:src,gain:gain,name:name};'
+          '};'
+          'w.lexi._fadeOutBg=function(prev,fadeMs){'
+            'var ctx=this.ctx;'
+            'try{prev.gain.gain.cancelScheduledValues(ctx.currentTime);}catch(e){}'
+            'prev.gain.gain.setValueAtTime(prev.gain.gain.value,ctx.currentTime);'
+            'prev.gain.gain.linearRampToValueAtTime(0,ctx.currentTime+fadeMs/1000);'
+            'setTimeout(function(){'
+              'try{prev.source.stop();prev.source.disconnect();prev.gain.disconnect();}catch(e){}'
+            '},fadeMs+80);'
+          '};'
+          'w.lexi.setBg=function(name,fadeMs){'
+            'try{'
+              'if(typeof fadeMs!=="number")fadeMs=400;'
+              'var curName=this.currentBg?this.currentBg.name:null;'
+              'console.log("[lexi sound] setBg",name,"(was",curName+",","ctx="+this.ctx.state+", bufReady="+!!this.buffers[name]+")");'
+              'if(this.currentBg&&this.currentBg.name===name)return;'
+              # AudioContext can\'t start audio until a user gesture has
+              # resumed it. Queue the request; the resume handler will
+              # pick it up.
+              'if(this.ctx.state==="suspended"){this.pendingBg=name;return;}'
+              'if(!this.buffers[name]){this.pendingBg=name;return;}'
+              'var prev=this.currentBg;'
+              'this._startBg(name,fadeMs);'
+              'if(prev)this._fadeOutBg(prev,fadeMs);'
+            '}catch(e){console.warn("[lexi sound] setBg threw:",e);}'
+          '};'
+          'w.lexi.stopBg=function(fadeMs){'
+            'try{'
+              'if(typeof fadeMs!=="number")fadeMs=400;'
+              'this.pendingBg=null;'
+              'if(!this.currentBg)return;'
+              'var prev=this.currentBg;'
+              'this.currentBg=null;'
+              'this._fadeOutBg(prev,fadeMs);'
+            '}catch(e){console.warn("[lexi sound] stopBg threw:",e);}'
+          '};'
+          'w.lexi.setBgMuted=function(b){'
+            'try{'
+              'this.bgmuted=!!b;'
+              'if(this.currentBg){'
+                'var ctx=this.ctx;'
+                'var target=this.bgmuted?0:this.bgvolume;'
+                'this.currentBg.gain.gain.cancelScheduledValues(ctx.currentTime);'
+                'this.currentBg.gain.gain.setValueAtTime(this.currentBg.gain.gain.value,ctx.currentTime);'
+                'this.currentBg.gain.gain.linearRampToValueAtTime(target,ctx.currentTime+0.25);'
+              '}'
+            '}catch(e){}'
+          '};'
           'w.lexi.play=function(name){'
             'try{'
               'if(this.muted)return;'
@@ -94,6 +170,15 @@ def inject_sound_engine(st):
               '.then(function(buf){return w.lexi.ctx.decodeAudioData(buf);})'
               '.then(function(audioBuf){w.lexi.buffers[n]=audioBuf;loaded++;'
                 'if(loaded===names.length){console.log("[lexi sound] all",loaded,"buffers decoded");}'
+                # If this buffer was the one Python asked to play before
+                # decode finished, kick it off now. Closes a race where
+                # set_bg() fired during init, set pendingBg, the resume
+                # handler ran setBg(pn) which re-set pendingBg because
+                # the buffer wasn\'t ready yet, and nothing ever started.
+                'if(w.lexi.pendingBg===n&&w.lexi.ctx.state==="running"){'
+                  'var pn=w.lexi.pendingBg;w.lexi.pendingBg=null;'
+                  'w.lexi.setBg(pn,400);'
+                '}'
               '})'
               '.catch(function(err){console.warn("[lexi sound] load failed for",n,err.message);});'
           '});'
@@ -101,16 +186,29 @@ def inject_sound_engine(st):
           # Resume the AudioContext on the first user gesture. Once
           # resumed, all future play() calls work without re-prompting.
           'var resume=function(){'
+            'var afterResume=function(){'
+              # Kick off any background music that was requested before the
+              # context was unlocked (e.g. menu music on home screen).
+              'if(w.lexi.pendingBg){'
+                'var pn=w.lexi.pendingBg;w.lexi.pendingBg=null;'
+                # Delay slightly so any in-flight decodeAudioData has a chance
+                # to finish on first page load.
+                'setTimeout(function(){w.lexi.setBg(pn,400);},150);'
+              '}'
+            '};'
             'if(w.lexi.ctx.state==="suspended"){'
               'w.lexi.ctx.resume().then(function(){'
                 'console.log("[lexi sound] AudioContext resumed");'
+                'afterResume();'
               '}).catch(function(e){console.warn("[lexi sound] resume failed:",e);});'
-            '}'
+            '}else{afterResume();}'
             'w.document.removeEventListener("pointerdown",resume);'
             'w.document.removeEventListener("keydown",resume);'
+            'w.document.removeEventListener("touchstart",resume);'
           '};'
           'w.document.addEventListener("pointerdown",resume,{once:true});'
           'w.document.addEventListener("keydown",resume,{once:true});'
+          'w.document.addEventListener("touchstart",resume,{once:true});'
           # Global UI click sound — fires once per click on any
           # button, link, or role=button. Capture phase so we hear
           # it even if a child stops propagation. Skip clicks on
@@ -187,8 +285,50 @@ def flush(st):
 
 
 def set_muted(st, muted: bool):
-    """Sync mute state from session_state to the JS engine."""
+    """Sync SFX mute state from session_state to the JS engine."""
     val = "true" if muted else "false"
     _inject_parent_js(_target_js(
         f'try{{if(w.lexi)w.lexi.muted={val};}}catch(e){{}}'
+    ))
+
+
+def set_music_muted(st, muted: bool):
+    """Sync music mute state. Smoothly ramps the current bg gain to/from 0
+    so toggling doesn't click."""
+    val = "true" if muted else "false"
+    _inject_parent_js(_target_js(
+        f'try{{if(w.lexi&&w.lexi.setBgMuted)w.lexi.setBgMuted({val});}}catch(e){{}}'
+    ))
+
+
+def set_bg(st, name: str, fade_ms: int = BG_DEFAULT_FADE_MS):
+    """Declarative: ensure `name` is the playing background track.
+
+    No-op if the engine is already playing it (so calling on every rerun
+    is fine). Crossfades over `fade_ms` when switching. If the
+    AudioContext hasn't been unlocked yet by a user gesture, the request
+    is queued in the JS engine and starts on first gesture.
+    """
+    if st.session_state.get("_current_bg") == name:
+        return
+    st.session_state._current_bg = name
+    # Nonce comment so revisiting a previously-used track (e.g.
+    # bg_afterbb → bg_main → bg_afterbb → bg_main) produces a *new* JS
+    # string each time. Streamlit dedupes components.html iframes by
+    # exact content at the same render position, so without this the
+    # second crossfade silently never fires. Same pattern as play().
+    n = next(_play_nonce)
+    _inject_parent_js(_target_js(
+        f'try{{if(w.lexi&&w.lexi.setBg)w.lexi.setBg("{name}",{fade_ms});}}catch(e){{}}/*bg{n}*/'
+    ))
+
+
+def stop_bg(st, fade_ms: int = BG_DEFAULT_FADE_MS):
+    """Fade out and stop the current background track."""
+    if st.session_state.get("_current_bg") is None:
+        return
+    st.session_state._current_bg = None
+    n = next(_play_nonce)
+    _inject_parent_js(_target_js(
+        f'try{{if(w.lexi&&w.lexi.stopBg)w.lexi.stopBg({fade_ms});}}catch(e){{}}/*bg{n}*/'
     ))

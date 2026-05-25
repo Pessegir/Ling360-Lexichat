@@ -407,6 +407,24 @@ def react_to_guess(raw, round_idx, word, tkn, history, synonym_list,
 # --------------------------------------------------------------------------
 
 
+# Atmospheric pre-round lines that don't depend on per-word metadata.
+# Used in demo mode when batch_word_metadata couldn't fill function /
+# structure / origin (all "None"), so the patter doesn't deflate to just
+# "round N / N points / hmm".
+_NEUTRAL_PRE_ROUND_TEASERS = [
+    "Bakalım bu sefer ne çıkacak karşımıza efendim...",
+    "Bu kelime üzerinde biraz duralım, bakalım açacak mı kendini...",
+    "Hadi şöyle bir bakalım buna efendim...",
+    "Sıradaki kelimemiz biraz oyunbaz olabilir, dikkatli olun...",
+    "Bakalım hangi gizemi saklıyor bu sefer...",
+    "Sıkı durun efendim, sıradaki kelime ilginç...",
+    "Bu kelime de bir başka türlü efendim, hazır olun...",
+    "Kalem kâğıt yanınızda olsun derim, bakalım ne çıkacak...",
+    "Hazır mısınız efendim, sahne sizin...",
+    "Şöyle bir nefes alalım, sonra dalıyoruz kelimeye...",
+]
+
+
 def pre_info_messages(question_number, total_score, round_idx,
                       function_list, structure_list, origin_list):
     """Return a list of (text, sleep_after) tuples for the pre-round chatter."""
@@ -461,6 +479,10 @@ def pre_info_messages(question_number, total_score, round_idx,
         msgs.append((random.choice(mumbling), 1.0))
         if s_type != "None":
             msgs.append((f"Bu bir {s_type}... Bakalım neymiş...", 0))
+        elif f_type == "None":
+            # No per-word metadata at all (demo mode) — add one atmospheric
+            # teaser so the opening doesn't feel skeletal.
+            msgs.append((random.choice(_NEUTRAL_PRE_ROUND_TEASERS), 0))
         return msgs
 
     msgs.append((random.choice(list_1), 1.0))
@@ -468,6 +490,11 @@ def pre_info_messages(question_number, total_score, round_idx,
     msgs.append((random.choice(mumbling), 1.0))
     if f_type != "None":
         msgs.append((random.choice(function_phrases), 0))
+    elif random.random() < 0.5:
+        # Demo fallback: half the time, fill the function-phrase slot
+        # with a content-free teaser so patter has texture without
+        # claiming anything about the word.
+        msgs.append((random.choice(_NEUTRAL_PRE_ROUND_TEASERS), 0))
 
     hint_chance = random.randint(1, 5)
     if hint_chance % 4 == 0 and root != "None":
@@ -504,7 +531,20 @@ def score_for_correct_answer(word, revealed_letters):
     return blank_count * 100
 
 
-def correct_answer_celebration(word, round_score):
+def correct_answer_celebration(word, round_score, *, clean: bool = False):
+    """Host's win line. `clean=True` means the player got the answer
+    without ever revealing a letter — fires a richer 'tek hamlede!'
+    bank so the moment lands.
+    """
+    if clean:
+        return random.choice([
+            f"İşte bu efendim! Tek harf bile almadan {word} — alkışlıyorum, {round_score} puan tertemiz!",
+            f"Helal valla efendim! Hiç yardım almadan {round_score} puan — böyle olmalı işte...",
+            f"Müthiş! {word}, ne bir harf ne bir ipucu — tek vuruşta {round_score} puan, harika!",
+            f"Bravo bravo, resital gibi! {round_score} puan ve hiç harf harcamadınız efendim...",
+            f"Tek hamlede {round_score} efendim — bu nasıl bir keskinlik, doğrusu hayran kaldım...",
+            f"İşte usta işi! {word}, tek seferde — {round_score} puanı saygıyla kasaya...",
+        ])
     return random.choice([
         f"Tebrik ederim efendim {word} doğru cevap ve size {round_score} puan kazandırıyor...",
         f"Bir {round_score} puan geliyor...",

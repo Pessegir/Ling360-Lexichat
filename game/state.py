@@ -44,6 +44,16 @@ class GameState:
     # said the same wrong thing 5 times". Reset per round.
     input_counts: dict = field(default_factory=dict)
 
+    # Mood signals — feed compute_mood() to vary the host's tone within
+    # the same persona. Both reset per round; updated by _handle_input
+    # after each user input.
+    #   wrong_streak    — consecutive failed real-word guesses this round
+    #                     (≥ 3 flips host into `teasing`).
+    #   last_was_close  — most recent guess was edit-distance close OR
+    #                     a typo of the answer (flips host into `playful`).
+    wrong_streak: int = 0
+    last_was_close: bool = False
+
     # Run-wide stats — survive across rounds, used by the end screen.
     hints_used: int = 0
     rounds_solved: int = 0
@@ -67,3 +77,7 @@ class GameState:
 
     def reset_input_counts(self):
         self.input_counts = {}
+
+    def reset_mood_signals(self):
+        self.wrong_streak = 0
+        self.last_was_close = False

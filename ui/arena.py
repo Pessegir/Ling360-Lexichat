@@ -22,6 +22,7 @@ from game.config import (
     ROUND_TIME_SECONDS, SILENCE_MAX_SECONDS, SILENCE_MIN_SECONDS,
     STUCK_KEYWORDS, TOTAL_GAME_TIME, TOTAL_ROUNDS,
 )
+from game.mood import compute_mood
 from game.nlp import get_synonym_phrase
 from game.round import (
     almost_had_it_reminder, correct_answer_celebration, end_game_lines,
@@ -175,7 +176,9 @@ def _check_silence(st, in_answer_mode: bool = False):
             state.almost_reminded_count += 1
         else:
             line = host.llm_silence_reply(
-                st.session_state.llm, state, round_ctx, in_answer_mode=in_answer_mode
+                st.session_state.llm, state, round_ctx,
+                in_answer_mode=in_answer_mode,
+                mood=compute_mood(state),
             )
         _say(st, "assistant", line)
         # Reset silence baseline so we don't fire again immediately
@@ -295,6 +298,7 @@ def _start_round(st, round_idx: int):
     state.reset_almost_memory()
     state.reset_nonsense_counters()
     state.reset_input_counts()
+    state.reset_mood_signals()
     # NOTE: don't clear score_pop here — the celebration line that
     # triggers it has a future reveal_at that crosses round boundaries.
     # _consume_score_pop self-clears via the `consumed` flag.
@@ -414,7 +418,9 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
                     "ancak buna kanmadılar kendileri...",
                     after=CHAT_STAGGER_HOST)
 
-            _say(st, "assistant", correct_answer_celebration(word, round_score),
+            clean_win = (round_score == len(word) * 100)
+            _say(st, "assistant",
+                 correct_answer_celebration(word, round_score, clean=clean_win),
                  after=CHAT_STAGGER_HOST)
             state.total_score += round_score
             state.rounds_solved += 1
@@ -444,6 +450,11 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
             _say(st, "assistant", chosen)
             # Remember it for later teasing reminders
             state.almost_had_it = True
+            # Mood reset — they just typed the exact answer. They were
+            # the closest possible; on the next host turn this will
+            # surface as `playful` ("dilinizin ucundaydı, hadi bb!").
+            state.wrong_streak = 0
+            state.last_was_close = True
 
     # === Branch: asks about origin ===
     elif any(it in ["kök", "köken", "kökenli", "kökeni"] for it in tkn):
@@ -475,6 +486,7 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
             ]))
         else:
             branch_taken = "bb-enter"
+            sound.queue(st, "bb")
             _begin_answering(st)
             _say(st, "assistant", random.choice([
                 "Süreyi durdurdum efendim, 45 saniyeniz var...",
@@ -564,6 +576,16 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
         if reaction is not None:
             branch_taken = "guess-reaction"
             _say(st, "assistant", reaction)
+            # Mood signal update. The "yakla" substring identifies all
+            # close-guess branches inside react_to_guess (string-familiar,
+            # synonym overlap, edit-distance). Wrong-guess increment fires
+            # only for the real-attempt filter (single token, 4-15 chars)
+            # — same shape react_to_guess uses for its generic brushoff.
+            if "yakla" in reaction.lower():
+                state.last_was_close = True
+            elif len(tkn) == 1 and " " not in raw and 4 <= len(raw) <= 15:
+                state.wrong_streak += 1
+                state.last_was_close = False
         else:
             branch_taken = "llm-fallback"
             state.round_history.append(("user", line))
@@ -571,6 +593,7 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
             reply = host.llm_host_reply(
                 st.session_state.llm, state, round_ctx, line,
                 state.round_history, in_answer_mode=in_answer_mode,
+                mood=compute_mood(state),
             )
             llm_ms = (time.perf_counter() - t_llm) * 1000
             _say(st, "assistant", reply)
@@ -821,6 +844,7 @@ def render_arena(st):
     )
     focus_chat_input(st)
     if line:
+        sound.queue(st, "click")
         # Show a spinner during processing so even slow paths (LLM call)
         # feel intentional rather than frozen.
         with typing_indicator(st):
@@ -964,6 +988,7 @@ def render_answering(st):
     )
     focus_chat_input(st)
     if line:
+        sound.queue(st, "click")
         with typing_indicator(st):
             _handle_input(st, line, in_answer_mode=True)
         # If the round ended (correct answer), force a rerun so the new
@@ -1058,6 +1083,7 @@ def render_prologue(st):
     )
     focus_chat_input(st)
     if line:
+        sound.queue(st, "click")
         # Echo the player's bubble immediately
         _say(st, "user", line)
 
@@ -1155,7 +1181,13 @@ def render_between(st):
 
     if next_deadline is not None:
         ms = max(50, int((next_deadline - now) * 1000) + 80)
+        # `w` is NOT defined by the _inject_parent_js wrapper (only `d` is).
+        # Resolve the parent window explicitly so the setTimeout actually
+        # gets scheduled. Without this the IIFE throws ReferenceError on
+        # every fire and the auto-advance never happens — you can only
+        # ever exit `between` by typing 'devam'.
         js = (
+            'var pw;try{pw=window.top;pw.document;}catch(e){pw=window.parent;}'
             'var btn=null;'
             'var bts=d.querySelectorAll(\'.stButton button, button\');'
             'bts.forEach(function(b){'
@@ -1163,8 +1195,8 @@ def render_between(st):
             '});'
             'if(btn){'
               # Clear any prior pending click so we don't fire-on-stale-deadline
-              'if(w.__lexiBetweenTimer){clearTimeout(w.__lexiBetweenTimer);}'
-              f'w.__lexiBetweenTimer=setTimeout(function(){{try{{btn.click();}}catch(e){{}}}},{ms});'
+              'if(pw.__lexiBetweenTimer){clearTimeout(pw.__lexiBetweenTimer);}'
+              f'pw.__lexiBetweenTimer=setTimeout(function(){{try{{btn.click();}}catch(e){{}}}},{ms});'
             '}'
         )
         _inject_parent_js(js)
@@ -1180,6 +1212,7 @@ def render_between(st):
     line = st.chat_input(placeholder, key="between_input")
     focus_chat_input(st)
     if line:
+        sound.queue(st, "click")
         _say(st, "user", line)
         raw = line.lower().strip()
         if raw == "puan":

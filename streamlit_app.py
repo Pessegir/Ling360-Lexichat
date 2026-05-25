@@ -65,7 +65,9 @@ DEFAULTS = {
         "openrouter": "",
     },
     "difficulty": "normal",
-    "sound_enabled": True,    # mute toggle in the sidebar
+    "sfx_enabled": True,      # one-shot SFX mute toggle (sidebar)
+    "music_enabled": True,    # looping background-music mute toggle (sidebar)
+    "_current_bg": None,      # name of bg track the JS engine should be playing
     "game_state": None,       # GameState instance once a game starts
     "llm": None,
     "word_list": None,
@@ -190,13 +192,21 @@ def render_sidebar():
 
         st.markdown("---")
 
-        sound_on = st.toggle(
-            "🔊 Sesler",
-            value=st.session_state.sound_enabled,
-            help="Tile, doğru/yanlış cevap, oyun sonu sesleri.",
+        sfx_on = st.toggle(
+            "🔊 Ses efektleri",
+            value=st.session_state.sfx_enabled,
+            help="Tile, doğru/yanlış cevap, buton sesleri.",
         )
-        st.session_state.sound_enabled = sound_on
-        sound.set_muted(st, not sound_on)
+        st.session_state.sfx_enabled = sfx_on
+        sound.set_muted(st, not sfx_on)
+
+        music_on = st.toggle(
+            "🎵 Müzik",
+            value=st.session_state.music_enabled,
+            help="Arka plan müziği (menüde, oyunda ve cevap fazında).",
+        )
+        st.session_state.music_enabled = music_on
+        sound.set_music_muted(st, not music_on)
 
         st.markdown("---")
 
@@ -479,6 +489,37 @@ PHASE_RENDERERS = {
 }
 
 
+# Background music per phase. "answering" is special — see _pick_bg.
+_PHASE_TO_BG = {
+    "home": "background_main",
+    "loading": "background_main",
+    "prologue": "background_main",
+    "playing": "bg_main",
+    "between": "bg_main",
+    "answering": "bg_afterbb",
+    "end": "background_main",
+    "history": "background_main",
+}
+
+# Seconds of remaining bb-timer at which we crossfade from bg_afterbb to
+# tension. Picked to land in the "stomach drop" zone without firing too
+# early to feel naggy.
+_TENSION_THRESHOLD_S = 10
+
+
+def _pick_bg(st) -> str:
+    """Decide which background track should be playing right now."""
+    phase = st.session_state.phase
+    if phase == "answering":
+        deadline = st.session_state.get("answer_deadline")
+        if deadline is not None:
+            remaining = deadline - time.time()
+            if 0 < remaining <= _TENSION_THRESHOLD_S:
+                return "tension"
+        return "bg_afterbb"
+    return _PHASE_TO_BG.get(phase, "background_main")
+
+
 def main():
     render_sidebar()
 
@@ -496,6 +537,10 @@ def main():
             # 3 s avoids racing st.chat_input submissions while still
             # firing the 45-s server timeout.
             st_autorefresh(interval=3000, key="answer_phase_tick")
+
+    # Set background music for the current phase. set_bg is idempotent —
+    # if the engine is already playing this track, the inject is skipped.
+    sound.set_bg(st, _pick_bg(st))
 
     renderer = PHASE_RENDERERS.get(st.session_state.phase, render_home)
     renderer()
