@@ -102,6 +102,14 @@ def best_score(player_name: str, path: Path = SCORES_DB_PATH) -> int | None:
         return row[0] if row and row[0] is not None else None
 
 
+def has_any_games(path: Path = SCORES_DB_PATH) -> bool:
+    """True if any finished game has been saved on this device. Used by
+    the home screen to decide whether to surface the tutorial banner."""
+    with closing(_connect(path)) as conn, closing(conn.cursor()) as cur:
+        cur.execute("SELECT 1 FROM games LIMIT 1")
+        return cur.fetchone() is not None
+
+
 def clear_history(player_name: str = None, path: Path = SCORES_DB_PATH):
     """Delete history. If player_name is given, only that player's."""
     with closing(_connect(path)) as conn, closing(conn.cursor()) as cur:

@@ -58,7 +58,11 @@ class GameState:
     hints_used: int = 0
     rounds_solved: int = 0
     rounds_failed: int = 0
-    # (word, outcome) where outcome is "solved" or "failed".
+    # Per-round outcome dicts:
+    #   {"word": str, "outcome": "solved"|"failed", "letters_revealed": int}
+    # Used by the end-screen word list, the SQLite history dump, and the
+    # share-block emoji grid. Old saved rows (pre-2026-05) may be plain
+    # [word, outcome] pairs — readers should handle both shapes.
     words_played: list = field(default_factory=list)
 
     def reset_revealed(self):

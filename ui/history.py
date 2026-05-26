@@ -96,8 +96,12 @@ def _render_row(st, row: dict, *, show_player: bool):
         with st.expander("Kelimeleri gör"):
             lines = []
             for i, entry in enumerate(words, 1):
-                # Stored as [word, outcome] (was tuple at save time).
-                if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                # Modern format: dict {word, outcome, letters_revealed}.
+                # Legacy format (pre-2026-05): [word, outcome] tuple.
+                if isinstance(entry, dict):
+                    word = entry.get("word", "?")
+                    outcome = entry.get("outcome", "?")
+                elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
                     word, outcome = entry[0], entry[1]
                 else:
                     word, outcome = str(entry), "?"

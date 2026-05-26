@@ -26,11 +26,14 @@ from game.state import GameState
 from llm_client import (
     DeepseekClient, GeminiClient, HuggingFaceClient, LLMError, OpenRouterClient,
 )
+from game.prefs import get_pref, set_pref
+from game.scores import has_any_games
 from ui import theme
 from ui.arena import render_arena, render_answering, render_between, render_prologue
 from ui.components import host_bubble, release_chat_input_focus, wordmark
 from ui.end import render_end
 from ui.history import render_history
+from ui.tutorial import render_tutorial
 from ui import sound
 
 
@@ -218,6 +221,17 @@ def render_sidebar():
             if st.button("🏠 Ana sayfa", use_container_width=True, type="secondary"):
                 st.session_state.phase = "home"
                 st.rerun()
+        # Only available outside active gameplay — tutorial shares
+        # chat_log with the arena, so entering it mid-game would wipe
+        # the live game's history.
+        if st.session_state.phase in ("home", "end", "history"):
+            if st.button("📖 Nasıl oynanır?",
+                         use_container_width=True, type="secondary"):
+                for k in ("tutorial_step", "tutorial_revealed"):
+                    st.session_state.pop(k, None)
+                st.session_state.chat_log = []
+                st.session_state.phase = "tutorial"
+                st.rerun()
 
 
 # --------------------------------------------------------------------------
@@ -238,6 +252,34 @@ def render_home():
     )
 
     st.write("")
+
+    # First-time banner: surface the tutorial. Stops appearing once
+    # either button is clicked OR the player finishes any game.
+    if (not get_pref("tutorial_completed", False)
+            and not has_any_games()):
+        st.markdown(
+            '<div class="lexi-tutorial-banner">'
+            '<strong>Lexi-Chat\'e ilk kez mi geldiniz?</strong><br>'
+            'Mekaniği görmek için kısa bir tanıtım turu var — 1 dakika sürer.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        bcol1, bcol2 = st.columns([2, 1])
+        with bcol1:
+            if st.button("📖 Tanıtım turunu başlat",
+                         type="primary", use_container_width=True,
+                         key="home_tutorial_start"):
+                set_pref("tutorial_completed", True)
+                st.session_state.chat_log = []
+                st.session_state.phase = "tutorial"
+                st.rerun()
+        with bcol2:
+            if st.button("Direkt başla", type="secondary",
+                         use_container_width=True,
+                         key="home_tutorial_skip"):
+                set_pref("tutorial_completed", True)
+                st.rerun()
+        st.write("")
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -479,6 +521,7 @@ def render_loading():
 
 PHASE_RENDERERS = {
     "home": render_home,
+    "tutorial": lambda: render_tutorial(st),
     "loading": render_loading,
     "prologue": lambda: render_prologue(st),
     "playing": lambda: render_arena(st),
@@ -492,6 +535,7 @@ PHASE_RENDERERS = {
 # Background music per phase. "answering" is special — see _pick_bg.
 _PHASE_TO_BG = {
     "home": "background_main",
+    "tutorial": "background_main",
     "loading": "background_main",
     "prologue": "background_main",
     "playing": "bg_main",

@@ -727,6 +727,26 @@ hr {{
     text-align: center;
 }}
 
+/* First-time tutorial banner on the home screen. Soft amber tint over
+   the panel surface — looks "highlighted" without becoming an ad. */
+.lexi-tutorial-banner {{
+    background: linear-gradient(180deg,
+        rgba(245, 199, 106, 0.10) 0%,
+        rgba(245, 199, 106, 0.04) 100%);
+    border: 1px solid {ACCENT_DIM};
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.5rem;
+    color: {TEXT};
+    font-family: {FONT_BODY};
+    font-size: 0.92rem;
+    line-height: 1.45;
+}}
+.lexi-tutorial-banner strong {{
+    color: {ACCENT};
+    font-weight: 600;
+}}
+
 .lexi-stat-label {{
     font-family: {FONT_BODY};
     font-size: 0.65rem;

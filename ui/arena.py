@@ -424,7 +424,10 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
                  after=CHAT_STAGGER_HOST)
             state.total_score += round_score
             state.rounds_solved += 1
-            state.words_played.append((word, "solved"))
+            state.words_played.append({
+                "word": word, "outcome": "solved",
+                "letters_revealed": len(word) - state.revealed_letters.count("_  "),
+            })
             # Update the score-pop's "at" so the animation triggers when
             # the celebration line reveals (cursor advanced after the
             # _say above).
@@ -524,7 +527,10 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
                     "Üzgünüm efendim, tüm harfleri açtınız. Bu sorudan puan alamadınız!\n"
                     "Sıradaki soruya geçelim...")
                 state.rounds_failed += 1
-                state.words_played.append((word, "failed"))
+                state.words_played.append({
+                    "word": word, "outcome": "failed",
+                    "letters_revealed": len(word) - state.revealed_letters.count("_  "),
+                })
                 _advance_to_next_round(st)
                 return
 
@@ -799,7 +805,10 @@ def _handle_answering_timeout(st):
     round_score = score_for_correct_answer(word, state.revealed_letters)
     state.total_score -= round_score
     state.rounds_failed += 1
-    state.words_played.append((word, "failed"))
+    state.words_played.append({
+        "word": word, "outcome": "failed",
+        "letters_revealed": len(word) - state.revealed_letters.count("_  "),
+    })
     # Stash a negative score-pop so the renderer animates the loss.
     st.session_state.score_pop = {
         "delta": -round_score,

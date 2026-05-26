@@ -6,10 +6,12 @@ TOTAL_ROUNDS questions, or _advance_to_next_round runs out of rounds.
 from __future__ import annotations
 
 import html as html_lib
+from urllib.parse import quote as urlquote
 
 from game.config import TOTAL_GAME_TIME, TOTAL_ROUNDS
 from game.round import end_game_lines
 from game.scores import best_score, save_game
+from game.share import build_share_block
 from ui import sound
 from ui.components import host_bubble, release_chat_input_focus, wordmark
 
@@ -76,7 +78,7 @@ def _persist_game(st, state) -> None:
             duration_seconds=_elapsed_seconds(state),
             difficulty=st.session_state.get("difficulty", "normal"),
             ran_out_of_time=bool(state.game_over),
-            words=[[w, outcome] for w, outcome in state.words_played],
+            words=list(state.words_played),
         )
     except Exception:
         # Persisting must never block the end screen.
@@ -182,11 +184,38 @@ def render_end(st):
     if state.words_played:
         with st.expander("📝 Bu oyundaki kelimeler"):
             rows = []
-            for i, (word, outcome) in enumerate(state.words_played, 1):
+            for i, entry in enumerate(state.words_played, 1):
+                word = entry["word"]
+                outcome = entry["outcome"]
                 icon = "✓" if outcome == "solved" else "✗"
                 safe_word = html_lib.escape(word)
                 rows.append(f"{i}. {icon} **{safe_word}**")
             st.markdown("  \n".join(rows))
+
+    # === Share block ===
+    # Only show if the player actually played rounds. mode='daily' will
+    # be wired when the daily-challenge phase ships; for now everything
+    # is 'free'.
+    if state.words_played:
+        share_mode = st.session_state.get("game_mode", "free")
+        share_text = build_share_block(state, mode=share_mode)
+        with st.expander("📤 Sonucu paylaş"):
+            # st.code adds a built-in copy-to-clipboard icon top-right.
+            st.code(share_text, language=None)
+            encoded = urlquote(share_text)
+            scol1, scol2 = st.columns(2)
+            with scol1:
+                st.link_button(
+                    "💬 WhatsApp",
+                    f"https://wa.me/?text={encoded}",
+                    use_container_width=True,
+                )
+            with scol2:
+                st.link_button(
+                    "𝕏 Twitter",
+                    f"https://twitter.com/intent/tweet?text={encoded}",
+                    use_container_width=True,
+                )
 
     st.write("")
 
