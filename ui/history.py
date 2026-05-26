@@ -65,6 +65,17 @@ def _render_row(st, row: dict, *, show_player: bool):
     player = (row.get("player_name") or "").strip()
 
     timer_icon = " ⏱" if ran_out else ""
+    mode = (row.get("mode") or "free").strip()
+    daily_date = (row.get("daily_date") or "").strip()
+    # Daily rows always have 5 rounds; free rows have TOTAL_ROUNDS.
+    # (Pre-feature rows have mode=None → default to free.)
+    from game.daily import DAILY_ROUNDS
+    row_total = DAILY_ROUNDS if mode == "daily" else TOTAL_ROUNDS
+    mode_chip = ""
+    if mode == "daily":
+        label = f"🌅 Bugünün Yarışması · {daily_date}" if daily_date else "🌅 Bugünün Yarışması"
+        mode_chip = f'<span class="lexi-hist-mode-daily">{html_lib.escape(label)}</span>'
+
     player_chunk = ""
     if show_player and player:
         player_chunk = (
@@ -76,11 +87,12 @@ def _render_row(st, row: dict, *, show_player: bool):
 <div class="lexi-hist-row">
   <div class="lexi-hist-row-top">
     <span class="lexi-hist-date">{html_lib.escape(played_at)}{timer_icon}</span>
+    {mode_chip}
     {player_chunk}
     <span class="lexi-hist-score">{score:,}</span>
   </div>
   <div class="lexi-hist-row-meta">
-    <span>{rounds} / {TOTAL_ROUNDS} tur</span>
+    <span>{rounds} / {row_total} tur</span>
     <span>·</span>
     <span>{hints} harf</span>
     <span>·</span>

@@ -24,6 +24,7 @@ from game.config import (
 )
 from game.mood import compute_mood
 from game.nlp import get_synonym_phrase
+from game.text_utils import tr_fold
 from game.round import (
     almost_had_it_reminder, correct_answer_celebration, end_game_lines,
     give_hint, letter_request, nonsense_meme, pre_info_messages,
@@ -387,7 +388,14 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
     )
 
     # === Branch: types the answer ===
-    if raw == word.lower() or word in tkn:
+    # Fold circumflex accents so "kakül" matches "kâkül" — Turkish
+    # keyboards don't expose â/î/û. Compare folded raw and folded tokens
+    # against the folded answer; never alter raw itself (we still echo
+    # the original input).
+    _word_folded = tr_fold(word.lower())
+    _raw_folded = tr_fold(raw)
+    _tkn_folded = [tr_fold(t) for t in tkn]
+    if _raw_folded == _word_folded or _word_folded in _tkn_folded:
         if in_answer_mode:
             # Correct! End the round — celebration + score + advance.
             branch_taken = "answer-correct"
@@ -689,7 +697,7 @@ def _advance_to_next_round(st):
     st.session_state.answer_deadline = None
     st.session_state.answer_started_at = None
     next_idx = st.session_state.round_idx + 1
-    if next_idx >= TOTAL_ROUNDS:
+    if next_idx >= st.session_state.game_state.total_rounds:
         st.session_state.phase = "end"
         return
 
@@ -885,7 +893,7 @@ def render_arena(st):
         st,
         score=state.total_score,
         round_num=round_idx + 1,
-        total_rounds=TOTAL_ROUNDS,
+        total_rounds=state.total_rounds,
         seconds_remaining=int(state.total_time),
         in_answer_mode=False,
         live=True,  # JS animates the countdown between reruns
@@ -1025,7 +1033,7 @@ def render_answering(st):
         st,
         score=state.total_score,
         round_num=round_idx + 1,
-        total_rounds=TOTAL_ROUNDS,
+        total_rounds=state.total_rounds,
         # Show the (paused) global timer alongside, dim — gives the player
         # a sense of the game-wide budget they'll resume into.
         seconds_remaining=int(state.total_time),
@@ -1190,23 +1198,19 @@ def render_between(st):
 
     if next_deadline is not None:
         ms = max(50, int((next_deadline - now) * 1000) + 80)
-        # `w` is NOT defined by the _inject_parent_js wrapper (only `d` is).
-        # Resolve the parent window explicitly so the setTimeout actually
-        # gets scheduled. Without this the IIFE throws ReferenceError on
-        # every fire and the auto-advance never happens — you can only
-        # ever exit `between` by typing 'devam'.
+        # Set the deadline on BOTH window.top and window.parent — they
+        # may resolve to different objects when Streamlit nests the
+        # components iframe an extra level. The poller (on top) reads
+        # from top; writing to parent only would leave the poller blind.
+        # Each try/catch is independent so one cross-origin failure
+        # doesn't prevent the other write.
         js = (
-            'var pw;try{pw=window.top;pw.document;}catch(e){pw=window.parent;}'
-            'var btn=null;'
-            'var bts=d.querySelectorAll(\'.stButton button, button\');'
-            'bts.forEach(function(b){'
-              'if(b.textContent && b.textContent.indexOf("__lexi_between_tick__")>=0){btn=b;}'
-            '});'
-            'if(btn){'
-              # Clear any prior pending click so we don't fire-on-stale-deadline
-              'if(pw.__lexiBetweenTimer){clearTimeout(pw.__lexiBetweenTimer);}'
-              f'pw.__lexiBetweenTimer=setTimeout(function(){{try{{btn.click();}}catch(e){{}}}},{ms});'
-            '}'
+            f'var dl=Date.now()+{ms};'
+            'var setOnTop=false,setOnParent=false;'
+            'try{window.top.__lexiBetweenDeadline=dl;setOnTop=true;}catch(e){}'
+            'try{window.parent.__lexiBetweenDeadline=dl;setOnParent=true;}catch(e){}'
+            f'console.log("[lexi between] deadline set, fires in ~{ms}ms",'
+                '"(top="+setOnTop+", parent="+setOnParent+")");'
         )
         _inject_parent_js(js)
 
@@ -1280,7 +1284,7 @@ def render_between(st):
         st,
         score=state.total_score,
         round_num=st.session_state.round_idx + 1,
-        total_rounds=TOTAL_ROUNDS,
+        total_rounds=state.total_rounds,
         seconds_remaining=int(state.total_time),
         in_answer_mode=False,
         live=False,  # global timer is paused-ish during transition

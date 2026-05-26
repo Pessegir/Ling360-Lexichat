@@ -9,6 +9,7 @@ import html as html_lib
 from urllib.parse import quote as urlquote
 
 from game.config import TOTAL_GAME_TIME, TOTAL_ROUNDS
+from game.daily import today_in_tr
 from game.round import end_game_lines
 from game.scores import best_score, save_game
 from game.share import build_share_block
@@ -69,6 +70,8 @@ def _persist_game(st, state) -> None:
     player_name = (st.session_state.get("player_name") or "").strip()
     if not player_name:
         return
+    mode = st.session_state.get("game_mode", "free")
+    daily_date = today_in_tr().isoformat() if mode == "daily" else None
     try:
         row_id = save_game(
             player_name=player_name,
@@ -79,6 +82,8 @@ def _persist_game(st, state) -> None:
             difficulty=st.session_state.get("difficulty", "normal"),
             ran_out_of_time=bool(state.game_over),
             words=list(state.words_played),
+            mode=mode,
+            daily_date=daily_date,
         )
     except Exception:
         # Persisting must never block the end screen.
@@ -166,7 +171,7 @@ def render_end(st):
 <div class="lexi-end-stats">
   <div class="lexi-stat-card">
     <div class="lexi-stat-label">{_ICON_CHECK}<span>DOĞRU CEVAP</span></div>
-    <div class="lexi-stat-value">{state.rounds_solved} / {TOTAL_ROUNDS}</div>
+    <div class="lexi-stat-value">{state.rounds_solved} / {state.total_rounds}</div>
   </div>
   <div class="lexi-stat-card">
     <div class="lexi-stat-label">{_ICON_LETTER}<span>HARF AÇILDI</span></div>
@@ -193,13 +198,21 @@ def render_end(st):
             st.markdown("  \n".join(rows))
 
     # === Share block ===
-    # Only show if the player actually played rounds. mode='daily' will
-    # be wired when the daily-challenge phase ships; for now everything
-    # is 'free'.
     if state.words_played:
         share_mode = st.session_state.get("game_mode", "free")
+        # Daily mode: surface the "everyone got the same words" angle
+        # so the share button feels meaningful, not vain.
+        if share_mode == "daily":
+            st.markdown(
+                '<div class="lexi-tutorial-banner">'
+                '🌅 <strong>Bugünkü kelimeler herkes için aynıydı.</strong> '
+                'Skorunuzu arkadaşlarınızla paylaşın ve onları da bekleyin.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
         share_text = build_share_block(state, mode=share_mode)
-        with st.expander("📤 Sonucu paylaş"):
+        with st.expander("📤 Sonucu paylaş",
+                         expanded=(share_mode == "daily")):
             # st.code adds a built-in copy-to-clipboard icon top-right.
             st.code(share_text, language=None)
             encoded = urlquote(share_text)
@@ -219,12 +232,23 @@ def render_end(st):
 
     st.write("")
 
+    is_daily = st.session_state.get("game_mode") == "daily"
+
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🎙️ Tekrar oyna", type="primary", use_container_width=True):
-            _reset_for_new_game(st)
-            st.session_state.phase = "loading"
-            st.rerun()
+        # Daily mode: replay is locked until tomorrow, so route to home
+        # where the player can pick Serbest Yarışma instead.
+        if is_daily:
+            if st.button("🏠 Ana sayfa", type="primary", use_container_width=True,
+                         help="Bugünün yarışmasını tamamladınız — yarın yeni kelimeler."):
+                _reset_for_new_game(st)
+                st.session_state.phase = "home"
+                st.rerun()
+        else:
+            if st.button("🎙️ Tekrar oyna", type="primary", use_container_width=True):
+                _reset_for_new_game(st)
+                st.session_state.phase = "loading"
+                st.rerun()
     with col2:
         if st.button("📊 Skorları gör", type="secondary", use_container_width=True):
             st.session_state.phase = "history"

@@ -747,6 +747,21 @@ hr {{
     font-weight: 600;
 }}
 
+/* Daily-mode chip on score-history rows */
+.lexi-hist-mode-daily {{
+    display: inline-block;
+    background: rgba(245, 199, 106, 0.13);
+    border: 1px solid {ACCENT_DIM};
+    border-radius: 12px;
+    padding: 0.05rem 0.55rem;
+    color: {ACCENT};
+    font-family: {FONT_BODY};
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    margin-right: 0.5rem;
+}}
+
 .lexi-stat-label {{
     font-family: {FONT_BODY};
     font-size: 0.65rem;

@@ -548,32 +548,56 @@ def typing_indicator(st, label: str = "SUNUCU KONUŞUYOR"):
 def mark_fresh_chat_messages(st):
     """Mark just-rendered chat messages with .lexi-fresh so only the
     new ones animate in. Also auto-scrolls the chat container to the
-    bottom on new messages, while respecting the user's manual
-    scroll-up (don't yank them around if they're reading history).
+    bottom on new messages.
 
-    Compares DOM count to the previous count stashed on window.parent;
-    the last (count - last) messages get the .lexi-fresh class. Resets
-    when count drops (new round, navigation back to arena).
+    The state counter and the scroll itself BOTH live on the persistent
+    top window — using `d` (window.parent.document) and `w`
+    (window.parent) instead silently fails when Streamlit nests the
+    components iframe one level deeper than expected. The scroll runs
+    in a requestAnimationFrame so it sees the post-reflow scrollHeight,
+    not the stale one from before the new bubble was painted.
     """
     js = (
-        'var w=window.parent;'
-        'var msgs=d.querySelectorAll(".lexi-chat-row,.lexi-chat-system");'
+        # Probe both top and parent for the chat scroll element — they
+        # can be different windows when Streamlit nests iframes, and the
+        # element may live in either.
+        'function _findChatSc(){'
+          'try{var s=window.top.document.getElementById("lexi-chat-scroll");if(s)return s;}catch(e){}'
+          'try{var s=window.parent.document.getElementById("lexi-chat-scroll");if(s)return s;}catch(e){}'
+          'return null;'
+        '}'
+        'var pw;try{pw=window.top;pw.document;}catch(e){pw=window.parent;}'
+        'var pd=pw.document;'
+        'var msgs=pd.querySelectorAll(".lexi-chat-row,.lexi-chat-system");'
         'var count=msgs.length;'
-        'var last=(typeof w.__lexiChatLast==="number")?w.__lexiChatLast:0;'
+        'var last=(typeof pw.__lexiChatLast==="number")?pw.__lexiChatLast:0;'
         'if(count<last)last=0;'
         'var newCount=count-last;'
         'if(newCount>0){'
           'for(var i=last;i<count;i++){msgs[i].classList.add("lexi-fresh");}'
         '}'
-        'w.__lexiChatLast=count;'
-        # Auto-scroll: if user is at bottom OR new messages arrived,
-        # snap to bottom. If they scrolled up to read history and
-        # nothing new came in, leave them alone.
-        'var sc=d.getElementById("lexi-chat-scroll");'
-        'if(sc){'
-          'var atBottom=(sc.scrollHeight - sc.scrollTop - sc.clientHeight) < 80;'
-          'if(atBottom || newCount > 0){sc.scrollTop=sc.scrollHeight;}'
+        'pw.__lexiChatLast=count;'
+        # Brute-force snap to bottom: fire at multiple beats so it
+        # catches the post-layout scrollHeight regardless of when
+        # Streamlit finishes its DOM commit. The previous single-rAF
+        # approach raced certain phase transitions and left the user
+        # looking at the top of the chat panel. Decision logic still
+        # respects manual scroll-up: only snaps when content grew OR
+        # the user was already near the bottom.
+        'function _maybeSnap(){'
+          'var sc=_findChatSc();'
+          'if(!sc)return;'
+          'var prevH=pw.__lexiChatLastHeight||0;'
+          'var curH=sc.scrollHeight;'
+          'var atBottom=(curH-sc.scrollTop-sc.clientHeight)<80;'
+          'var grew=(curH>prevH);'
+          'if(atBottom||newCount>0||grew){sc.scrollTop=curH;}'
+          'pw.__lexiChatLastHeight=curH;'
         '}'
+        '_maybeSnap();'                                # synchronous
+        'pw.requestAnimationFrame(_maybeSnap);'         # post-paint
+        'pw.setTimeout(_maybeSnap,80);'                 # catch slow layouts
+        'pw.setTimeout(_maybeSnap,250);'                # final safety net
     )
     _inject_parent_js(js)
 

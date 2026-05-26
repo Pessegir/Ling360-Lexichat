@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .config import TOTAL_GAME_TIME
+from .config import TOTAL_GAME_TIME, TOTAL_ROUNDS
 
 
 @dataclass
@@ -12,6 +12,10 @@ class GameState:
     """Mutable state for one playthrough. Drivers (CLI / Streamlit) own one
     instance per game. Pure data — no I/O, no timers, no threads.
     """
+    # How many rounds this playthrough has. Default matches the
+    # original 14-round free game; daily mode (game.daily.DAILY_ROUNDS)
+    # passes 5. arena reads this when deciding when to advance to end.
+    total_rounds: int = TOTAL_ROUNDS
     total_score: int = 0
     revealed_letters: list = field(default_factory=list)
     is_paused: bool = True

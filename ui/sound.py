@@ -230,6 +230,44 @@ def inject_sound_engine(st):
         # in components.py use w=window.parent and read w.lexi — both
         # refs point to the same engine object.
         'try{if(window.parent!==w){window.parent.lexi=w.lexi;}}catch(e){}'
+        # Long-lived between-phase poller. INSTALLED OUTSIDE the
+        # buffers-init gate so a Streamlit hot-reload that didn\'t
+        # reset window.top can still pick this up. Each render_between
+        # sets w.__lexiBetweenDeadline = epoch_ms; this 250ms poller
+        # clicks the hidden tick button when the deadline passes.
+        # Bulletproof against the components-iframe destruction race
+        # that killed the old setTimeout-based approach.
+        'if(!w.__lexiBetweenPoller){'
+          'w.__lexiBetweenTicks=0;'
+          'w.__lexiBetweenLastDl=null;'
+          'w.__lexiBetweenPoller=w.setInterval(function(){'
+            'w.__lexiBetweenTicks++;'
+            'var dl=w.__lexiBetweenDeadline;'
+            # First time we observe a non-null deadline, log it so we
+            # can verify the writer is targeting our window.
+            'if(dl!=null&&dl!==w.__lexiBetweenLastDl){'
+              'console.log("[lexi between] poller saw deadline",dl,'
+                '"now="+Date.now()+", "+(dl-Date.now())+"ms left");'
+              'w.__lexiBetweenLastDl=dl;'
+            '}'
+            # Heartbeat every ~5s when idle so we can confirm the poller is alive
+            'if(dl==null&&w.__lexiBetweenTicks%20===0){'
+              'console.log("[lexi between] poller heartbeat (no deadline set)");'
+            '}'
+            'if(dl==null)return;'
+            'if(Date.now()<dl)return;'
+            'w.__lexiBetweenDeadline=null;'
+            'w.__lexiBetweenLastDl=null;'
+            'var btn=null;'
+            'var bts=w.document.querySelectorAll("button");'
+            'bts.forEach(function(b){'
+              'if(b.textContent&&b.textContent.indexOf("__lexi_between_tick__")>=0)btn=b;'
+            '});'
+            'if(btn){console.log("[lexi between] poll fire: clicking tick button");btn.click();}'
+            'else{console.warn("[lexi between] poll fire: tick button not in DOM (phase changed?)");}'
+          '},250);'
+          'console.log("[lexi between] poller installed on",w===window.top?"top":"parent");'
+        '}'
     )
     _inject_parent_js(js)
 

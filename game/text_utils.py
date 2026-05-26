@@ -39,3 +39,27 @@ def apply_unicode_transform(words):
 
 def clean_string(text):
     return re.sub(r'[^\w\s]', "", text)
+
+
+# Turkish keyboards usually don't expose circumflex vowels (â/î/û). When
+# the answer is "kâkül" and the player types "kakül", we should accept
+# it — the player has no way to type the â. Same for matching tokens.
+# Maps both lowercase and uppercase variants in one pass.
+_CIRCUMFLEX_FOLD = str.maketrans({
+    "â": "a", "Â": "A",
+    "î": "i", "Î": "İ",  # 'Î' lowercase is 'i' in Turkish; uppercase fold keeps the Turkish dotted İ
+    "û": "u", "Û": "U",
+    "ô": "o", "Ô": "O",
+    "ê": "e", "Ê": "E",
+})
+
+
+def tr_fold(text: str) -> str:
+    """Strip circumflex accents so player guesses match the canonical
+    answer regardless of the â/î/û variants on Turkish keyboards.
+
+    Use for COMPARISON only — never for display or storage.
+    """
+    if not text:
+        return text
+    return text.translate(_CIRCUMFLEX_FOLD)

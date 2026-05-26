@@ -26,8 +26,9 @@ from game.state import GameState
 from llm_client import (
     DeepseekClient, GeminiClient, HuggingFaceClient, LLMError, OpenRouterClient,
 )
+from game.daily import DAILY_ROUNDS, today_in_tr
 from game.prefs import get_pref, set_pref
-from game.scores import has_any_games
+from game.scores import daily_run_today, has_any_games
 from ui import theme
 from ui.arena import render_arena, render_answering, render_between, render_prologue
 from ui.components import host_bubble, release_chat_input_focus, wordmark
@@ -71,6 +72,7 @@ DEFAULTS = {
     "sfx_enabled": True,      # one-shot SFX mute toggle (sidebar)
     "music_enabled": True,    # looping background-music mute toggle (sidebar)
     "_current_bg": None,      # name of bg track the JS engine should be playing
+    "game_mode": "free",      # 'free' (14-round) or 'daily' (5-round seeded)
     "game_state": None,       # GameState instance once a game starts
     "llm": None,
     "word_list": None,
@@ -323,16 +325,46 @@ def render_home():
     if needs_key:
         can_start = False
 
-    button_label = "🎙️ Yeni oyun" if can_start else "🎙️ Yeni oyun"
-    if st.button(button_label, type="primary", use_container_width=True, disabled=not can_start):
-        st.session_state.phase = "loading"
-        st.rerun()
+    # Daily-already-played gate: same-day replay is blocked.
+    today_iso = today_in_tr().isoformat()
+    today_run = daily_run_today(today_iso) if can_start else None
+    daily_done = today_run is not None
+
+    cta1, cta2 = st.columns(2)
+    with cta1:
+        if st.button("🎙️ Serbest Yarışma",
+                     type="primary", use_container_width=True,
+                     disabled=not can_start,
+                     help="14 kelime, 5 dakika. İstediğiniz kadar oynayabilirsiniz."):
+            st.session_state.game_mode = "free"
+            st.session_state.phase = "loading"
+            st.rerun()
+    with cta2:
+        daily_help = (
+            f"Bugün {today_run['score']:,} puan aldınız — yarın yeni kelimeler bekliyor."
+            if daily_done
+            else f"{DAILY_ROUNDS} kelime, herkes için aynı. Günde tek deneme."
+        )
+        if st.button(
+            "🌅 Bugünün Yarışması",
+            type="secondary", use_container_width=True,
+            disabled=not can_start or daily_done,
+            help=daily_help,
+        ):
+            st.session_state.game_mode = "daily"
+            st.session_state.phase = "loading"
+            st.rerun()
 
     if not st.session_state.player_name:
         st.caption("✏️ Başlamak için isminizi yazın.")
     elif needs_key:
         st.caption("🔑 Başlamak için API anahtarınızı sol kenara yapıştırın "
                    "ya da Demo moduna geçin.")
+    elif daily_done:
+        st.caption(
+            f"🌅 Bugünün yarışmasını tamamladınız — **{today_run['score']:,} puan**. "
+            "Yarın yeni kelimeler için tekrar bekleriz."
+        )
 
 
 # --------------------------------------------------------------------------
@@ -441,13 +473,17 @@ def render_loading():
         f'<div class="lexi-host-bubble">{_WARMUP_LINES[2]}</div>',
         unsafe_allow_html=True,
     )
+    n_words = DAILY_ROUNDS if st.session_state.get("game_mode") == "daily" else TOTAL_ROUNDS
     status.markdown(
-        _lights_html(2, "14 kelime seçiliyor..."),
+        _lights_html(2, f"{n_words} kelime seçiliyor..."),
         unsafe_allow_html=True,
     )
 
     try:
-        payload = build_new_game(resources, llm)
+        payload = build_new_game(
+            resources, llm,
+            mode=st.session_state.get("game_mode", "free"),
+        )
     except Exception as e:
         st.error(f"Oyun hazırlanırken hata: {e}")
         if st.button("← Ana sayfaya dön", type="secondary"):
@@ -462,7 +498,10 @@ def render_loading():
 
     # Seed all session state for the game
     full_username = f"{st.session_state.player_name} {st.session_state.player_address}"
-    st.session_state.game_state = GameState(username=full_username)
+    st.session_state.game_state = GameState(
+        username=full_username,
+        total_rounds=payload["total_rounds"],
+    )
     st.session_state.llm = llm
     st.session_state.word_list = payload["word_list"]
     st.session_state.definition_list = payload["definition_list"]
