@@ -6,6 +6,7 @@ has no Streamlit import-side-effect — easier to unit-test the HTML output.
 from __future__ import annotations
 
 import html as html_lib
+import json
 import time
 from contextlib import contextmanager
 
@@ -545,10 +546,17 @@ def typing_indicator(st, label: str = "SUNUCU KONUŞUYOR"):
         placeholder.empty()
 
 
-def mark_fresh_chat_messages(st):
+def mark_fresh_chat_messages(st, *, force_snap: bool = False):
     """Mark just-rendered chat messages with .lexi-fresh so only the
     new ones animate in. Also auto-scrolls the chat container to the
     bottom on new messages.
+
+    `force_snap=True` snaps to the bottom on every beat regardless of the
+    heuristics. The between phase passes this: it reruns ~1×/s under
+    autorefresh, and on those same-phase reruns phaseChanged/newCount/grew
+    all read false while a freshly-laid-out container reads "not at bottom",
+    so the panel would otherwise drift back to the top. Manual scroll-up
+    isn't a real use case during a 2-4 s auto-advancing transition.
 
     The state counter and the scroll itself BOTH live on the persistent
     top window — using `d` (window.parent.document) and `w`
@@ -556,8 +564,18 @@ def mark_fresh_chat_messages(st):
     components iframe one level deeper than expected. The scroll runs
     in a requestAnimationFrame so it sees the post-reflow scrollHeight,
     not the stale one from before the new bubble was painted.
+
+    On a phase change the chat container is a fresh DOM node scrolled to
+    the top, and a transition often adds no new bubble — so newCount,
+    `grew` and `atBottom` can all read false and the snap is skipped,
+    leaving the player looking at the top of the panel. We detect the
+    phase change server-side and force the snap on every beat for that
+    first render, while still respecting a manual scroll-up within a phase.
     """
+    cur_phase = json.dumps(st.session_state.get("phase", ""))
+    force_js = "true" if force_snap else "false"
     js = (
+        f'var force={force_js};'
         # Probe both top and parent for the chat scroll element — they
         # can be different windows when Streamlit nests iframes, and the
         # element may live in either.
@@ -567,6 +585,11 @@ def mark_fresh_chat_messages(st):
           'return null;'
         '}'
         'var pw;try{pw=window.top;pw.document;}catch(e){pw=window.parent;}'
+        # Force a snap on the first render after a phase change, regardless
+        # of the heuristics below — a fresh container is always at the top.
+        f'var curPhase={cur_phase};'
+        'var phaseChanged=(pw.__lexiChatPhase!==curPhase);'
+        'pw.__lexiChatPhase=curPhase;'
         'var pd=pw.document;'
         'var msgs=pd.querySelectorAll(".lexi-chat-row,.lexi-chat-system");'
         'var count=msgs.length;'
@@ -579,11 +602,10 @@ def mark_fresh_chat_messages(st):
         'pw.__lexiChatLast=count;'
         # Brute-force snap to bottom: fire at multiple beats so it
         # catches the post-layout scrollHeight regardless of when
-        # Streamlit finishes its DOM commit. The previous single-rAF
-        # approach raced certain phase transitions and left the user
-        # looking at the top of the chat panel. Decision logic still
-        # respects manual scroll-up: only snaps when content grew OR
-        # the user was already near the bottom.
+        # Streamlit finishes its DOM commit. Decision logic snaps when the
+        # phase just changed (fresh container), the content grew, a new
+        # bubble arrived, or the user was already near the bottom — so a
+        # deliberate scroll-up within a phase is left alone.
         'function _maybeSnap(){'
           'var sc=_findChatSc();'
           'if(!sc)return;'
@@ -591,7 +613,7 @@ def mark_fresh_chat_messages(st):
           'var curH=sc.scrollHeight;'
           'var atBottom=(curH-sc.scrollTop-sc.clientHeight)<80;'
           'var grew=(curH>prevH);'
-          'if(atBottom||newCount>0||grew){sc.scrollTop=curH;}'
+          'if(force||phaseChanged||atBottom||newCount>0||grew){sc.scrollTop=curH;}'
           'pw.__lexiChatLastHeight=curH;'
         '}'
         '_maybeSnap();'                                # synchronous

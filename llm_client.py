@@ -327,3 +327,89 @@ class OpenRouterClient(OpenAICompatibleClient):
             extra_headers={"HTTP-Referer": referer, "X-Title": title},
             provider_name="OpenRouter",
         )
+
+
+# --------------------------------------------------------------------------
+# Composition wrappers — used by the web app to stretch free-tier quota.
+#
+#   ChainClient   — fan across several providers; on quota/availability
+#                   failure, fall through to the next. Each provider has an
+#                   independent free tier, so this multiplies daily headroom.
+#   BudgetedClient — cap how many calls a single session may make against a
+#                   (possibly shared/operator-supplied) key, so one visitor
+#                   can't drain the free quota for everyone.
+#
+# Both are LLMClients, so the game code treats them like any other provider.
+# --------------------------------------------------------------------------
+
+
+class ChainClient(LLMClient):
+    """Try several providers in order; fall through to the next on any
+    LLMError (quota exhausted, provider overloaded, or an already-open
+    circuit breaker). Raises LLMError only when EVERY provider in the chain
+    fails — at which point the host degrades to scripted lines.
+
+    Remembers the last provider that worked and starts there next time, so
+    a dead leading provider isn't re-probed on every call.
+    """
+
+    def __init__(self, clients: list[LLMClient]):
+        self._clients = [c for c in clients if c is not None]
+        if not self._clients:
+            raise LLMError("ChainClient needs at least one provider.")
+        self._preferred = 0
+
+    def chat(self, system: str, messages: list[dict], max_tokens: int = 200) -> str:
+        last_err: Exception | None = None
+        n = len(self._clients)
+        # Start at the last-good provider, then wrap around the rest.
+        order = list(range(self._preferred, n)) + list(range(0, self._preferred))
+        for idx in order:
+            try:
+                out = self._clients[idx].chat(system, messages, max_tokens=max_tokens)
+                self._preferred = idx
+                return out
+            except LLMError as e:
+                last_err = e
+                continue
+        raise LLMError(f"All providers in chain unavailable. Last error: {last_err}")
+
+
+class BudgetedClient(LLMClient):
+    """Wrap another client with a per-session call cap.
+
+    `budget` is the max number of SUCCESSFUL calls a session may make
+    against the wrapped key; None means unlimited (used for a visitor's own
+    BYOK key). When the cap is reached, chat() raises LLMError so the host
+    falls back to scripted lines instead of hitting the shared key.
+
+    `low_priority=True` calls (e.g. silence fillers — the most frequent,
+    least essential banter) are cut once usage passes `budget - reserve`,
+    leaving the final `reserve` calls for high-value moments (guess
+    reactions, prologue, celebrations).
+
+    The usage counter lives outside this object (via get_used/add_used
+    callables) so it persists across the per-game client instances within a
+    single browser session.
+    """
+
+    def __init__(self, inner: LLMClient, *, budget: int | None, reserve: int,
+                 get_used, add_used):
+        self._inner = inner
+        self._budget = budget
+        self._reserve = max(0, reserve)
+        self._get_used = get_used
+        self._add_used = add_used
+
+    def chat(self, system: str, messages: list[dict], max_tokens: int = 200,
+             *, low_priority: bool = False) -> str:
+        if self._budget is not None:
+            used = self._get_used()
+            limit = self._budget - (self._reserve if low_priority else 0)
+            if used >= limit:
+                raise LLMError("Session LLM budget reached; using scripted host.")
+        # Only count calls that actually succeed — a provider failure that
+        # propagates here shouldn't burn the visitor's budget.
+        out = self._inner.chat(system, messages, max_tokens=max_tokens)
+        self._add_used(1)
+        return out

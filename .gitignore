@@ -1,5 +1,6 @@
 # Secrets — never commit real API keys
 datakey.json
+.streamlit/secrets.toml
 
 # Python
 __pycache__/

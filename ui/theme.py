@@ -1014,28 +1014,6 @@ hr {{
     }}
 }}
 
-/* === Between-phase hidden timer button ===
-   render_between renders a marker span followed by a Streamlit button
-   with a unique label. JS finds the button by text, sets a setTimeout
-   to click it at the next deadline (auto-advance or idle-nudge). The
-   click routes through Streamlit's normal event channel, so it can't
-   race chat_input submissions like the old 1.5 s autorefresh did. */
-.lexi-between-tick-marker {{
-    display: none !important;
-}}
-
-/* Hide the very next element container — the button itself. Uses :has
-   on the container, then adjacent-sibling on the next container. */
-[data-testid="stElementContainer"]:has(> .stMarkdown .lexi-between-tick-marker)
-  + [data-testid="stElementContainer"] {{
-    display: none !important;
-}}
-/* Fallback if the marker is rendered as a direct child of the container */
-[data-testid="stElementContainer"]:has(> .lexi-between-tick-marker)
-  + [data-testid="stElementContainer"] {{
-    display: none !important;
-}}
-
 /* === Custom chat layout — replaces st.chat_message ===
    Host gets italic Lora + teal stripe + mic avatar; player gets a
    right-aligned ivory bubble. Container scrolls internally so the

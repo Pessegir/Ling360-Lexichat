@@ -10,7 +10,10 @@ Run with:
 """
 from __future__ import annotations
 
+import json
 import time
+from functools import lru_cache
+from pathlib import Path
 
 import streamlit as st
 
@@ -20,11 +23,15 @@ except ImportError:
     st_autorefresh = None
 
 from game import host
-from game.config import APP_NAME, APP_TAGLINE, TOTAL_GAME_TIME, TOTAL_ROUNDS
+from game.config import (
+    APP_NAME, APP_TAGLINE, LLM_LOW_PRIORITY_RESERVE, LLM_SESSION_BUDGET,
+    TOTAL_GAME_TIME, TOTAL_ROUNDS,
+)
 from game.session import build_new_game, load_static_resources
 from game.state import GameState
 from llm_client import (
-    DeepseekClient, GeminiClient, HuggingFaceClient, LLMError, OpenRouterClient,
+    BudgetedClient, ChainClient, DeepseekClient, GeminiClient,
+    HuggingFaceClient, LLMError, OpenRouterClient,
 )
 from game.daily import DAILY_ROUNDS, today_in_tr
 from game.prefs import get_pref, set_pref
@@ -50,6 +57,68 @@ st.set_page_config(
 )
 
 theme.inject(st)
+
+
+# --------------------------------------------------------------------------
+# Bundled (server-side) API keys
+#
+# So the AI host works out of the box for visitors who don't bring their own
+# key, the app can ship with one or more FREE keys supplied by the operator:
+#   - On Streamlit Cloud: set them in the app's Secrets.
+#   - Locally: put them in datakey.json (gitignored).
+# Keys are read ONLY server-side and used for the actual API call in Python —
+# they are never written into the sidebar's password input, so they never
+# reach the browser DOM and can't be lifted by a visitor.
+#
+# Supplying keys for several providers lets the app fan across independent
+# free tiers (ChainClient): when one provider's daily quota is spent, the
+# next takes over, multiplying total free headroom. Gemini leads (best
+# Turkish). When no bundled key is configured at all, the app defaults to
+# scripted Demo mode.
+# --------------------------------------------------------------------------
+
+# provider name (matches PROVIDER_TABLE / client classes) -> secrets field.
+# Chain order is the dict order: Gemini first, then the free fallbacks.
+_BUNDLED_KEY_FIELDS = {
+    "gemini": "GEMINI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "huggingface": "HUGGINGFACE_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+}
+
+
+@lru_cache(maxsize=1)
+def _bundled_keys() -> dict[str, str]:
+    """Resolve operator-supplied default keys per provider, or {} if none.
+
+    st.secrets wins (deploy); datakey.json fills any gaps (local dev).
+    Memoized so we don't touch secrets/disk on every rerun.
+    """
+    out: dict[str, str] = {}
+    for provider, field in _BUNDLED_KEY_FIELDS.items():
+        # st.secrets raises if no secrets file is configured at all — guard it.
+        try:
+            val = st.secrets.get(field, "")  # type: ignore[attr-defined]
+            if val:
+                out[provider] = str(val).strip()
+        except Exception:
+            pass
+    try:
+        path = Path("datakey.json")
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for provider, field in _BUNDLED_KEY_FIELDS.items():
+                if provider not in out:
+                    val = str(data.get(field, "") or "").strip()
+                    if val:
+                        out[provider] = val
+    except Exception:
+        pass
+    return out
+
+
+def _has_bundled_key() -> bool:
+    return bool(_bundled_keys())
 
 
 # --------------------------------------------------------------------------
@@ -105,7 +174,18 @@ DEFAULTS = {
     # Between-rounds transition state. Set when a round ends; cleared
     # when the next round starts. See ui/arena._advance_to_next_round.
     "between_state": None,
+    # Per-session LLM call counter (against the bundled/shared key). Persists
+    # across games in a session so the budget cap can't be reset by replaying.
+    "llm_calls_used": 0,
 }
+
+# When the operator ships any bundled key, default new sessions to the
+# Gemini option — which, on the bundled path, fans across all configured
+# providers (see _make_llm). setdefault below means a visitor who later
+# picks Demo (or types their own key) keeps that choice across reruns.
+if _has_bundled_key():
+    DEFAULTS["provider"] = "gemini"
+
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
@@ -178,10 +258,15 @@ def render_sidebar():
                 key=f"provider_key_input_{key}",
             )
             st.session_state.provider_keys[key] = new_val
-            if not new_val:
-                st.caption(f"🔑 {caption}")
-            else:
+            if new_val:
                 st.caption(caption)
+            elif key == "gemini" and _has_bundled_key():
+                # Operator shipped free key(s) — AI is already on; the input
+                # is optional (lets a visitor use their own quota instead).
+                st.caption("✅ Sunucu hazır ücretsiz anahtarla çalışıyor. "
+                           "İsterseniz kendi anahtarınızı girin.")
+            else:
+                st.caption(f"🔑 {caption}")
             break
 
         st.markdown("---")
@@ -318,10 +403,11 @@ def render_home():
 
     can_start = bool(st.session_state.player_name)
     provider = st.session_state.provider
-    needs_key = (
-        provider != "demo"
-        and not (st.session_state.provider_keys.get(provider) or "").strip()
-    )
+    has_typed_key = bool((st.session_state.provider_keys.get(provider) or "").strip())
+    # The Gemini (default) option is also satisfied by the operator's bundled
+    # keys — the bundled path fans across whatever providers are configured.
+    has_bundled = provider == "gemini" and _has_bundled_key()
+    needs_key = provider != "demo" and not has_typed_key and not has_bundled
     if needs_key:
         can_start = False
 
@@ -386,13 +472,8 @@ _PROVIDER_CLIENT_CLASSES = {
 }
 
 
-def _make_llm():
-    provider = st.session_state.provider
-    if provider == "demo":
-        return None
-    api_key = (st.session_state.provider_keys.get(provider) or "").strip()
-    if not api_key:
-        return None  # Falls back to scripted-only
+def _build_single_client(provider: str, api_key: str):
+    """One provider client from an explicit key, or None on failure."""
     cls = _PROVIDER_CLIENT_CLASSES.get(provider)
     if cls is None:
         return None
@@ -401,6 +482,71 @@ def _make_llm():
     except LLMError as e:
         st.error(f"{provider} bağlantı hatası: {e}")
         return None
+
+
+def _build_bundled_chain():
+    """Build a client from the operator's bundled keys.
+
+    One configured provider → that client. Several → a ChainClient that
+    fans across their independent free tiers (Gemini first). None → None.
+    """
+    keys = _bundled_keys()
+    clients = []
+    for provider, _field in _BUNDLED_KEY_FIELDS.items():  # dict order = chain order
+        key = keys.get(provider)
+        if not key:
+            continue
+        client = _build_single_client(provider, key)
+        if client is not None:
+            clients.append(client)
+    if not clients:
+        return None
+    return clients[0] if len(clients) == 1 else ChainClient(clients)
+
+
+def _wrap_budget(base, *, capped: bool):
+    """Wrap a client with the per-session call cap.
+
+    capped=True applies LLM_SESSION_BUDGET (shared/bundled key); capped=False
+    is unlimited (a visitor's own BYOK key). Wrapping unconditionally means
+    every `llm` accepts the low_priority kwarg used by silence fillers.
+    """
+    def _get_used():
+        return st.session_state.get("llm_calls_used", 0)
+
+    def _add_used(n=1):
+        st.session_state["llm_calls_used"] = _get_used() + n
+
+    return BudgetedClient(
+        base,
+        budget=LLM_SESSION_BUDGET if capped else None,
+        reserve=LLM_LOW_PRIORITY_RESERVE,
+        get_used=_get_used,
+        add_used=_add_used,
+    )
+
+
+def _make_llm():
+    provider = st.session_state.provider
+    if provider == "demo":
+        return None
+
+    # Visitor typed their own key → that single provider, their own quota,
+    # uncapped (but still wrapped so low_priority is accepted).
+    typed = (st.session_state.provider_keys.get(provider) or "").strip()
+    if typed:
+        base = _build_single_client(provider, typed)
+        return _wrap_budget(base, capped=False) if base is not None else None
+
+    # No typed key. The Gemini (default) option uses the operator's bundled
+    # keys as a capped fallback chain — that's what makes the AI work out of
+    # the box. Any other provider without a key stays scripted (the home
+    # screen's needs_key gate prompts the visitor to paste one).
+    if provider == "gemini":
+        base = _build_bundled_chain()
+        return _wrap_budget(base, capped=True) if base is not None else None
+
+    return None
 
 
 def _lights_html(active_step: int, label: str, total_steps: int = 3) -> str:
@@ -606,20 +752,34 @@ def _pick_bg(st) -> str:
 def main():
     render_sidebar()
 
-    # Autorefresh is enabled ONLY during the answering phase (3 s) so the
-    # 45-s server deadline fires even if the player goes idle. Playing
-    # phase has NO autorefresh — the previous "chat reveal" autorefresh
-    # at 700 ms raced st.chat_input submissions and made the game feel
-    # broken ("can type but can't send"). The between phase used to have
-    # a 1.5 s autorefresh that occasionally dropped 'devam' submissions
-    # under the same race; it's now replaced by a hidden-button +
-    # JS setTimeout pattern inside render_between (ui/arena.py).
+    # Autorefresh drives the timed phases (`answering`, `between`) so their
+    # server-side deadlines fire even when the player goes idle. This is a
+    # plain server rerun trigger — unlike the old cross-iframe JS poller, it
+    # doesn't depend on window.top variable sharing surviving Streamlit's
+    # iframe churn, so it behaves identically on localhost and on Streamlit
+    # Cloud. Both renderers read st.chat_input BEFORE their timer checks, so
+    # a refresh-triggered rerun can never beat a just-typed submission.
+    #
+    # Interval is deliberately phase/mode-specific:
+    #   - answering: 3 s — coarse is fine for the 45-s deadline, and the
+    #     player is actively typing answers, so we want a wide gap from
+    #     st.chat_input submits (a faster tick reintroduces the historic
+    #     "can type but can't send" race seen at 700 ms in the playing phase).
+    #   - between/auto: 1 s — the auto-advance deadline is only 2-4 s, so it
+    #     needs ~1-s granularity to feel snappy; the player isn't expected to
+    #     be typing here, so the input race is a non-issue.
+    #   - between/wait: 3 s — the player IS typing 'devam', so use the
+    #     race-safe interval; the idle-nudge deadline is 10 s, plenty coarse.
+    # The PLAYING phase still has NO autorefresh (it has no server deadline,
+    # and any refresh there resurrects the chat_input race).
     if st_autorefresh is not None:
         phase = st.session_state.phase
         if phase == "answering":
-            # 3 s avoids racing st.chat_input submissions while still
-            # firing the 45-s server timeout.
             st_autorefresh(interval=3000, key="answer_phase_tick")
+        elif phase == "between":
+            bs = st.session_state.get("between_state") or {}
+            interval = 3000 if bs.get("mode") == "wait" else 1000
+            st_autorefresh(interval=interval, key="between_phase_tick")
 
     # Set background music for the current phase. set_bg is idempotent —
     # if the engine is already playing this track, the inject is skipped.

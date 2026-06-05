@@ -33,7 +33,7 @@ from game.round import (
 )
 from ui import sound
 from ui.components import (
-    _inject_parent_js, answer_timer, clue_card, focus_chat_input,
+    answer_timer, clue_card, focus_chat_input,
     host_bubble, info_chips, mark_fresh_chat_messages, tile_board,
     topbar, typing_indicator, wordmark,
 )
@@ -917,7 +917,7 @@ def render_arena(st):
     _render_chat(st)
 
 
-def _render_chat(st):
+def _render_chat(st, *, force_snap: bool = False):
     """Shared chat-history block used by both playing and answering.
 
     Custom HTML bubbles (not st.chat_message) so we get full styling
@@ -962,7 +962,7 @@ def _render_chat(st):
         f'</div>',
         unsafe_allow_html=True,
     )
-    mark_fresh_chat_messages(st)
+    mark_fresh_chat_messages(st, force_snap=force_snap)
 
 
 def render_answering(st):
@@ -1165,54 +1165,19 @@ def render_between(st):
       wait — host asks; waits for player to type 'devam' / 'hadi' / etc.
              Idle 10 s → host says "Devam edelim hadi" and auto-advances.
 
-    Timer mechanism: a hidden Streamlit button that JS clicks at the
-    next deadline via setTimeout. Replaces the old 1.5 s autorefresh,
-    which raced chat_input submissions and occasionally dropped a typed
-    'devam'. The button click routes through Streamlit's normal event
-    channel, same as chat_input — they no longer compete.
+    Timer mechanism: a mode-specific st_autorefresh (wired in
+    streamlit_app.main) reruns the script; the auto-advance / idle-nudge
+    checks below fire on the first rerun past their deadline. This is the
+    same server-side pattern the answering phase uses. It replaced an
+    earlier cross-iframe JS poller (a setInterval on window.top clicking a
+    hidden button) that depended on window.top variable sharing surviving
+    Streamlit's iframe churn — fragile, and silently dead on some hosts.
     """
     sound.flush(st)
     state = st.session_state.game_state
     bs = st.session_state.between_state or {}
     next_idx = bs.get("next_idx", st.session_state.round_idx + 1)
     mode = bs.get("mode", "auto")
-
-    # === Hidden timer button + JS setTimeout ===
-    # Marker span comes first so the CSS sibling selector (in theme.py)
-    # can hide the following element container — the button itself.
-    # Button label is unusual so it can't collide with real UI text.
-    st.markdown(
-        '<span class="lexi-between-tick-marker"></span>',
-        unsafe_allow_html=True,
-    )
-    st.button("__lexi_between_tick__", key="lexi_between_tick")
-
-    # Figure out the earliest pending deadline (auto-advance or idle-nudge).
-    now = time.time()
-    deadlines = []
-    if bs.get("auto_advance_at") is not None:
-        deadlines.append(bs["auto_advance_at"])
-    if mode == "wait" and bs.get("idle_nudge_at") is not None and not bs.get("nudged"):
-        deadlines.append(bs["idle_nudge_at"])
-    next_deadline = min(deadlines) if deadlines else None
-
-    if next_deadline is not None:
-        ms = max(50, int((next_deadline - now) * 1000) + 80)
-        # Set the deadline on BOTH window.top and window.parent — they
-        # may resolve to different objects when Streamlit nests the
-        # components iframe an extra level. The poller (on top) reads
-        # from top; writing to parent only would leave the poller blind.
-        # Each try/catch is independent so one cross-origin failure
-        # doesn't prevent the other write.
-        js = (
-            f'var dl=Date.now()+{ms};'
-            'var setOnTop=false,setOnParent=false;'
-            'try{window.top.__lexiBetweenDeadline=dl;setOnTop=true;}catch(e){}'
-            'try{window.parent.__lexiBetweenDeadline=dl;setOnParent=true;}catch(e){}'
-            f'console.log("[lexi between] deadline set, fires in ~{ms}ms",'
-                '"(top="+setOnTop+", parent="+setOnParent+")");'
-        )
-        _inject_parent_js(js)
 
     # === Player input FIRST ===
     # Read chat_input before the timer checks so a typed 'devam' is
@@ -1293,4 +1258,8 @@ def render_between(st):
     )
 
     # === Chat ===
-    _render_chat(st)
+    # force_snap: the between phase reruns ~1×/s under autorefresh; without
+    # forcing, the panel drifts back to the top between ticks (see
+    # mark_fresh_chat_messages). It's a passive auto-advancing beat, so
+    # always pinning to the bottom is the right behavior.
+    _render_chat(st, force_snap=True)

@@ -1,4 +1,7 @@
 {
   "GEMINI_API_KEY": "paste-your-gemini-api-key-here",
-  "_comment": "Copy this file to datakey.json and fill in your key. datakey.json is gitignored. Get a free Gemini key at https://aistudio.google.com/apikey"
+  "OPENROUTER_API_KEY": "",
+  "HUGGINGFACE_API_KEY": "",
+  "DEEPSEEK_API_KEY": "",
+  "_comment": "Copy to datakey.json (gitignored) and fill in at least GEMINI_API_KEY (free: https://aistudio.google.com/apikey). The other keys are OPTIONAL: supply any of them and the app fans across their independent free tiers, so when one provider's daily quota is spent the next takes over. Leave all blank to run in scripted Demo mode."
 }

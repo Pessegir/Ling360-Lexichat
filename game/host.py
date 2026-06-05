@@ -32,6 +32,21 @@ if not LLM_DEBUG:
 # --------------------------------------------------------------------------
 
 
+def _chat_maybe_low_priority(llm, *, system, messages, max_tokens):
+    """Call llm.chat, passing low_priority=True when the client supports it.
+
+    Only BudgetedClient (the web app's session-cap wrapper) understands
+    low_priority — it cuts these calls earlier to reserve budget for
+    high-value banter. Raw provider clients and the CLI driver don't accept
+    the kwarg, so fall back to a plain call for them.
+    """
+    try:
+        return llm.chat(system=system, messages=messages,
+                        max_tokens=max_tokens, low_priority=True)
+    except TypeError:
+        return llm.chat(system=system, messages=messages, max_tokens=max_tokens)
+
+
 def safe_chat(llm, system, messages, max_tokens=80, fallback=""):
     """Wrapper that never raises — returns `fallback` on any LLM error.
 
@@ -422,7 +437,8 @@ def llm_silence_reply(llm, state, round_ctx, in_answer_mode: bool = False,
     if random.random() > SILENCE_LLM_PROBABILITY or llm is None:
         return scripted_silence_reply(in_answer_mode, mood=mood)
     try:
-        raw = llm.chat(
+        raw = _chat_maybe_low_priority(
+            llm,
             system=host_system_prompt(state, round_ctx, in_answer_mode, mood=mood),
             messages=[{"role": "user", "content": "(Oyuncu sessiz kaldı, nazikçe dikkatini çek.)"}],
             max_tokens=120,
