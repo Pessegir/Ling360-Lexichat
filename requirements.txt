@@ -1,3 +1,7 @@
+# Pin setuptools < 81: zemberek-python imports pkg_resources, which
+# setuptools 81 removed — without this the app crashes on import in a fresh
+# environment (e.g. Streamlit Community Cloud). Keep first so it resolves early.
+setuptools<81
 google-genai>=1.0.0
 nltk>=3.9
 editdistance>=0.8.1
