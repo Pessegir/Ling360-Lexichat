@@ -212,7 +212,7 @@ def info_chips(st, revealed: dict):
 def topbar(st, *, score: int, round_num: int, total_rounds: int,
            seconds_remaining: int, in_answer_mode: bool = False,
            live: bool = False, pop: dict | None = None,
-           game_key: str = ""):
+           game_key: str = "", streak: int = 0, show_streak: bool = True):
     """Render the score/round/timer header strip.
 
     in_answer_mode = True → label changes to "CEVAP SÜRESİ", color shifts amber.
@@ -266,6 +266,16 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
         dot_html.append(f'<span class="{cls}"></span>')
     dots = "".join(dot_html)
 
+    # Clean-streak badge — cosmetic only. Shows from 2 consecutive no-letter
+    # wins (a single clean win isn't a "streak" yet). Hidden entirely when
+    # the player switches it off in settings.
+    streak_html = ""
+    if show_streak and streak >= 2:
+        streak_html = (
+            f'<span class="lexi-streak" title="{streak} soru üst üste '
+            f'tek harf almadan!">🔥<span class="lexi-streak-num">{streak}</span></span>'
+        )
+
     safe_game_key = html_lib.escape(game_key)
     st.markdown(
         f'''
@@ -273,7 +283,7 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
   <div class="lexi-chip">
     <div class="lexi-chip-label">PUAN</div>
     <div class="lexi-chip-value">
-      <span class="lexi-score-num" data-score="{score}" data-game-key="{safe_game_key}">{score:,}</span>{pop_html}
+      <span class="lexi-score-num" data-score="{score}" data-game-key="{safe_game_key}">{score:,}</span>{pop_html}{streak_html}
     </div>
   </div>
   <div class="lexi-chip">
@@ -359,6 +369,88 @@ def topbar(st, *, score: int, round_num: int, total_rounds: int,
             '},1000);'
         )
         _inject_parent_js(js)
+
+
+# --------------------------------------------------------------------------
+# Scoreboard drawer — slide-out panel on the right edge
+# --------------------------------------------------------------------------
+
+
+def scoreboard_drawer(st, *, score: int, best: int | None,
+                      round_num: int, total_rounds: int):
+    """Render (or update) the right-edge scoreboard drawer.
+
+    The drawer + its handle live in the PARENT document's <body> (built once
+    via JS, reused on later reruns) so `position: fixed` is relative to the
+    viewport — not trapped inside a Streamlit container that might create a
+    new containing block. Each rerun just refreshes the values and re-applies
+    the open/closed state, which is persisted on window.parent so it survives
+    Streamlit's iframe churn. The toggle is purely client-side: opening the
+    panel does NOT trigger a Streamlit rerun.
+    """
+    best_str = f"{best:,}" if best else "—"
+    payload = json.dumps({
+        "score": f"{score:,}",
+        "best": best_str,
+        "round": f"{round_num} / {total_rounds}",
+    })
+    js = (
+        'var w=window.parent;'
+        f'var data={payload};'
+        # --- ensure the drawer exists ---
+        'var sb=d.getElementById("lexi-scoreboard");'
+        'if(!sb){'
+          'sb=d.createElement("div");'
+          'sb.id="lexi-scoreboard";sb.className="lexi-scoreboard";'
+          'sb.innerHTML=\''
+            '<div class="lexi-sb-inner">'
+              '<div class="lexi-sb-title">SKOR TABLOSU</div>'
+              '<div class="lexi-sb-row"><span class="lexi-sb-label">PUAN</span>'
+                '<span class="lexi-sb-val" id="lexi-sb-score">0</span></div>'
+              '<div class="lexi-sb-row"><span class="lexi-sb-label">REKOR</span>'
+                '<span class="lexi-sb-val" id="lexi-sb-best">—</span></div>'
+              '<div class="lexi-sb-row"><span class="lexi-sb-label">SORU</span>'
+                '<span class="lexi-sb-val" id="lexi-sb-round">—</span></div>'
+            '</div>\';'
+          'd.body.appendChild(sb);'
+        '}'
+        # --- ensure the handle exists ---
+        'var h=d.getElementById("lexi-scoreboard-handle");'
+        'if(!h){'
+          'h=d.createElement("button");'
+          'h.id="lexi-scoreboard-handle";h.className="lexi-scoreboard-handle";'
+          'h.type="button";'
+          'd.body.appendChild(h);'
+        '}'
+        # --- refresh values ---
+        'd.getElementById("lexi-sb-score").textContent=data.score;'
+        'd.getElementById("lexi-sb-best").textContent=data.best;'
+        'd.getElementById("lexi-sb-round").textContent=data.round;'
+        # --- apply persisted open/closed state ---
+        'if(typeof w.__lexiSbOpen==="undefined"){w.__lexiSbOpen=false;}'
+        'function apply(){'
+          'var open=!!w.__lexiSbOpen;'
+          'sb.classList.toggle("open",open);'
+          'h.classList.toggle("open",open);'
+          'h.innerHTML=open?"\\u2715":"\\uD83D\\uDCCA";'
+          'h.setAttribute("aria-label",open?"Skor tablosunu kapat":"Skor tablosunu a\\u00e7");'
+        '}'
+        'h.onclick=function(){w.__lexiSbOpen=!w.__lexiSbOpen;apply();};'
+        'apply();'
+    )
+    _inject_parent_js(js)
+
+
+def remove_scoreboard(st):
+    """Tear down the scoreboard drawer + handle (called on non-game screens).
+
+    The drawer is appended to the parent <body>, so it would otherwise
+    persist after leaving the arena. Idempotent — does nothing if absent.
+    """
+    _inject_parent_js(
+        'var sb=d.getElementById("lexi-scoreboard");if(sb)sb.remove();'
+        'var h=d.getElementById("lexi-scoreboard-handle");if(h)h.remove();'
+    )
 
 
 # --------------------------------------------------------------------------

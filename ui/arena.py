@@ -427,6 +427,9 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
                     after=CHAT_STAGGER_HOST)
 
             clean_win = (round_score == len(word) * 100)
+            # Cosmetic clean-streak: a no-letter win extends it, any other
+            # win breaks it. (Fails reset it on the fail paths below.)
+            state.clean_streak = state.clean_streak + 1 if clean_win else 0
             _say(st, "assistant",
                  correct_answer_celebration(word, round_score, clean=clean_win),
                  after=CHAT_STAGGER_HOST)
@@ -535,6 +538,7 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
                     "Üzgünüm efendim, tüm harfleri açtınız. Bu sorudan puan alamadınız!\n"
                     "Sıradaki soruya geçelim...")
                 state.rounds_failed += 1
+                state.clean_streak = 0
                 state.words_played.append({
                     "word": word, "outcome": "failed",
                     "letters_revealed": len(word) - state.revealed_letters.count("_  "),
@@ -813,6 +817,7 @@ def _handle_answering_timeout(st):
     round_score = score_for_correct_answer(word, state.revealed_letters)
     state.total_score -= round_score
     state.rounds_failed += 1
+    state.clean_streak = 0
     state.words_played.append({
         "word": word, "outcome": "failed",
         "letters_revealed": len(word) - state.revealed_letters.count("_  "),
@@ -899,6 +904,8 @@ def render_arena(st):
         live=True,  # JS animates the countdown between reruns
         pop=_consume_score_pop(st),
         game_key=game_key,
+        streak=state.clean_streak,
+        show_streak=st.session_state.get("streak_counter_enabled", True),
     )
 
     # === Letter board ===
@@ -1040,6 +1047,8 @@ def render_answering(st):
         in_answer_mode=True,
         pop=_consume_score_pop(st),
         game_key=game_key,
+        streak=state.clean_streak,
+        show_streak=st.session_state.get("streak_counter_enabled", True),
     )
 
     # === Big answer-phase timer pill (JS-animated) ===
@@ -1255,6 +1264,8 @@ def render_between(st):
         live=False,  # global timer is paused-ish during transition
         pop=_consume_score_pop(st),
         game_key=st.session_state.get("game_key", ""),
+        streak=state.clean_streak,
+        show_streak=st.session_state.get("streak_counter_enabled", True),
     )
 
     # === Chat ===

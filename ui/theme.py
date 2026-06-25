@@ -560,6 +560,36 @@ hr {{
     100% {{ transform: translateY(-26px) scale(0.95); opacity: 0; }}
 }}
 
+/* Clean-streak badge — sits beside the score, cosmetic only. Warm amber
+   pill with a softly breathing ember glow (no neon — stays in the studio
+   palette). */
+.lexi-streak {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.12rem;
+    margin-left: 0.55rem;
+    padding: 0.05rem 0.4rem 0.05rem 0.3rem;
+    border-radius: 999px;
+    border: 1px solid {ACCENT_DIM};
+    background: rgba(245, 199, 106, 0.10);
+    font-size: 0.82rem;
+    line-height: 1.2;
+    vertical-align: middle;
+    animation: lexi-streak-ember 2.4s ease-in-out infinite;
+}}
+
+.lexi-streak-num {{
+    font-family: {FONT_HEADING};
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: {ACCENT};
+}}
+
+@keyframes lexi-streak-ember {{
+    0%, 100% {{ box-shadow: 0 0 6px rgba(245, 199, 106, 0.18); }}
+    50%      {{ box-shadow: 0 0 14px rgba(245, 199, 106, 0.40); }}
+}}
+
 /* Answer-phase timer pill (bb mode) */
 .lexi-answer-timer {{
     display: flex;
@@ -964,6 +994,105 @@ hr {{
     text-transform: uppercase;
 }}
 
+/* === Scoreboard drawer (right edge, slide-out) ===
+   Built in the parent <body> by JS so position:fixed tracks the viewport.
+   Closed = translated fully off-screen; .open slides it in. The handle is a
+   small tab clipped to the right edge that rides along with the panel. */
+.lexi-scoreboard {{
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    width: 248px;
+    max-width: 82vw;
+    background: linear-gradient(180deg, {SURFACE} 0%, {BG} 100%);
+    border-left: 1px solid {BORDER_BRIGHT};
+    box-shadow: -18px 0 40px rgba(0, 0, 0, 0.45);
+    transform: translateX(100%);
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 9998;
+    pointer-events: none;
+}}
+
+.lexi-scoreboard.open {{
+    transform: translateX(0);
+    pointer-events: auto;
+}}
+
+.lexi-sb-inner {{
+    padding: 4.5rem 1.4rem 1.4rem 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}}
+
+.lexi-sb-title {{
+    font-family: {FONT_HEADING};
+    font-size: 0.78rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: {ACCENT};
+    margin-bottom: 1rem;
+}}
+
+.lexi-sb-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid {BORDER};
+}}
+
+.lexi-sb-label {{
+    font-family: {FONT_HEADING};
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: {TEXT_DIM};
+}}
+
+.lexi-sb-val {{
+    font-family: {FONT_HEADING};
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: {TEXT};
+    font-variant-numeric: tabular-nums;
+}}
+
+.lexi-scoreboard-handle {{
+    position: fixed;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    z-index: 9999;
+    width: 38px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid {BORDER_BRIGHT};
+    border-right: none;
+    border-radius: 10px 0 0 10px;
+    background: {SURFACE_HIGH};
+    color: {ACCENT};
+    font-size: 1.1rem;
+    cursor: pointer;
+    box-shadow: -6px 0 16px rgba(0, 0, 0, 0.35);
+    transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                background 0.2s ease;
+}}
+
+.lexi-scoreboard-handle:hover {{
+    background: {BORDER_BRIGHT};
+}}
+
+.lexi-scoreboard-handle.open {{
+    /* Ride just left of the open panel. Uses min() so a narrow (82vw)
+       panel keeps the handle glued to its left edge on small screens. */
+    right: min(248px, 82vw);
+    border-radius: 10px 0 0 10px;
+}}
+
 /* === Mobile breakpoint (≤ 480 px) === */
 @media (max-width: 480px) {{
     .main .block-container {{
@@ -972,17 +1101,21 @@ hr {{
     }}
 
     .lexi-tile {{
-        width: 42px;
-        height: 42px;
+        width: 40px;
+        height: 40px;
     }}
 
     .lexi-tile span {{
-        font-size: 1.1rem;
+        font-size: 1.05rem;
     }}
 
+    /* Generous ROW gap (18px) so wrapped rows of 45°-rotated diamonds —
+       which visually overflow their 40px box by ~8px top & bottom — don't
+       collide when a long word spills onto a second line. Column gap stays
+       tight so more tiles fit per row before wrapping. */
     .lexi-tiles {{
-        gap: 6px;
-        padding: 1rem 0;
+        gap: 18px 6px;
+        padding: 0.9rem 0;
     }}
 
     .lexi-topbar {{
@@ -993,6 +1126,18 @@ hr {{
 
     .lexi-topbar .lexi-chip {{
         flex-basis: 45%;
+    }}
+
+    /* Streak badge: drop to its own line under the score so it never
+       pushes the PUAN chip wide enough to break the 2-up chip layout. */
+    .lexi-streak {{
+        margin-left: 0;
+        margin-top: 0.25rem;
+    }}
+    .lexi-chip-value {{
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
     }}
 
     /* Round dots wrap two rows on mobile rather than overflow */
@@ -1011,6 +1156,29 @@ hr {{
     .lexi-mic-glyph {{
         width: 28px;
         height: 28px;
+    }}
+
+    /* Slimmer scoreboard handle so it intrudes less on a narrow viewport */
+    .lexi-scoreboard-handle {{
+        width: 32px;
+        height: 56px;
+        font-size: 1rem;
+    }}
+}}
+
+/* === Very narrow phones (≤ 360 px) — shrink tiles so 8-9 letter words
+   still read on one or two clean rows === */
+@media (max-width: 360px) {{
+    .lexi-tile {{
+        width: 33px;
+        height: 33px;
+    }}
+    .lexi-tile span {{
+        font-size: 0.9rem;
+    }}
+    .lexi-tiles {{
+        gap: 15px 4px;
+        padding: 0.75rem 0;
     }}
 }}
 

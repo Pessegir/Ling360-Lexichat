@@ -62,6 +62,11 @@ class GameState:
     hints_used: int = 0
     rounds_solved: int = 0
     rounds_failed: int = 0
+    # Consecutive "clean" wins — rounds solved without revealing a single
+    # letter. Survives across rounds (only a fresh GameState resets it).
+    # Purely cosmetic: drives the 🔥 streak badge in the topbar. A win that
+    # used any letter, or a failed/timed-out round, breaks the streak.
+    clean_streak: int = 0
     # Per-round outcome dicts:
     #   {"word": str, "outcome": "solved"|"failed", "letters_revealed": int}
     # Used by the end-screen word list, the SQLite history dump, and the

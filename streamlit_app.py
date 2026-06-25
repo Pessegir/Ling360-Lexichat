@@ -35,10 +35,16 @@ from llm_client import (
 )
 from game.daily import DAILY_ROUNDS, today_in_tr
 from game.prefs import get_pref, set_pref
-from game.scores import daily_run_today, has_any_games
+from game.scores import best_score, daily_run_today, has_any_games
 from ui import theme
 from ui.arena import render_arena, render_answering, render_between, render_prologue
-from ui.components import host_bubble, release_chat_input_focus, wordmark
+from ui.components import (
+    host_bubble,
+    release_chat_input_focus,
+    remove_scoreboard,
+    scoreboard_drawer,
+    wordmark,
+)
 from ui.end import render_end
 from ui.history import render_history
 from ui.tutorial import render_tutorial
@@ -140,6 +146,8 @@ DEFAULTS = {
     "difficulty": "normal",
     "sfx_enabled": True,      # one-shot SFX mute toggle (sidebar)
     "music_enabled": True,    # looping background-music mute toggle (sidebar)
+    "streak_counter_enabled": True,  # show the cosmetic 🔥 clean-streak badge
+    "scoreboard_open": False,  # right-side scoreboard drawer open/closed
     "_current_bg": None,      # name of bg track the JS engine should be playing
     "game_mode": "free",      # 'free' (14-round) or 'daily' (5-round seeded)
     "game_state": None,       # GameState instance once a game starts
@@ -297,6 +305,13 @@ def render_sidebar():
         )
         st.session_state.music_enabled = music_on
         sound.set_music_muted(st, not music_on)
+
+        st.session_state.streak_counter_enabled = st.toggle(
+            "🔥 Seri sayacı",
+            value=st.session_state.streak_counter_enabled,
+            help="Üst üste hiç harf almadan bildiğiniz soruların sayacı. "
+                 "Sadece gösterimdir, puanı etkilemez.",
+        )
 
         st.markdown("---")
 
@@ -787,6 +802,39 @@ def main():
 
     renderer = PHASE_RENDERERS.get(st.session_state.phase, render_home)
     renderer()
+
+    _drive_scoreboard(phase=st.session_state.phase)
+
+
+# Phases that show the slide-out scoreboard drawer (an active playthrough).
+_SCOREBOARD_PHASES = {"prologue", "playing", "answering", "between"}
+
+
+def _drive_scoreboard(*, phase: str):
+    """Show the right-edge scoreboard during a playthrough; tear it down
+    everywhere else. The panel lives in the parent <body>, so it must be
+    explicitly removed when we leave the arena (home/end/history/etc.).
+    """
+    state = st.session_state.get("game_state")
+    if phase not in _SCOREBOARD_PHASES or state is None:
+        remove_scoreboard(st)
+        return
+
+    # Personal best to beat — previous saved games only (this run isn't
+    # saved yet). Cheap single-MAX query; tolerate a cold/missing DB.
+    player_name = (st.session_state.get("player_name") or "").strip()
+    try:
+        best = best_score(player_name) if player_name else None
+    except Exception:
+        best = None
+
+    scoreboard_drawer(
+        st,
+        score=state.total_score,
+        best=best,
+        round_num=st.session_state.get("round_idx", 0) + 1,
+        total_rounds=state.total_rounds,
+    )
 
 
 if __name__ == "__main__":
