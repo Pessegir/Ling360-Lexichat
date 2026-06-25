@@ -295,6 +295,8 @@ def _start_round(st, round_idx: int):
     state.reset_revealed()
     # Initialize blank tiles
     state.revealed_letters = ["_  "] * len(word)
+    # New round — stop showing the previous answer on the between board.
+    st.session_state.show_answer_board = False
     state.reset_round_history()
     state.reset_almost_memory()
     state.reset_nonsense_counters()
@@ -439,6 +441,12 @@ def _handle_input(st, line: str, user_already_logged: bool = False,
                 "word": word, "outcome": "solved",
                 "letters_revealed": len(word) - state.revealed_letters.count("_  "),
             })
+            # Reveal the whole answer on the board and keep it on screen
+            # through the `between` transition. Done AFTER words_played (which
+            # needs the real letters_revealed count) and AFTER scoring. A
+            # fresh board_key in render_between flips every tile once here.
+            state.revealed_letters = list(word)
+            st.session_state.show_answer_board = True
             # Update the score-pop's "at" so the animation triggers when
             # the celebration line reveals (cursor advanced after the
             # _say above).
@@ -1267,6 +1275,21 @@ def render_between(st):
         streak=state.clean_streak,
         show_streak=st.session_state.get("streak_counter_enabled", True),
     )
+
+    # === Answer board (only after a correct answer) ===
+    # Keep the solved word on screen until the next round starts. The flag
+    # is set in the correct-answer branch and cleared by _start_round. A
+    # "done:" board_key (distinct from the round's playing/answering key)
+    # gives the JS dedup a fresh slate, so every tile flips once on entry.
+    if st.session_state.get("show_answer_board"):
+        finished = st.session_state.get("round_ctx") or {}
+        finished_word = finished.get("word")
+        if finished_word and len(state.revealed_letters) == len(finished_word):
+            tile_board(
+                st, finished_word, state.revealed_letters,
+                board_key=f"done:{st.session_state.get('game_key', '')}:"
+                          f"{st.session_state.round_idx}:{finished_word}",
+            )
 
     # === Chat ===
     # force_snap: the between phase reruns ~1×/s under autorefresh; without

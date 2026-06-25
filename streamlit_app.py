@@ -148,6 +148,7 @@ DEFAULTS = {
     "music_enabled": True,    # looping background-music mute toggle (sidebar)
     "streak_counter_enabled": True,  # show the cosmetic 🔥 clean-streak badge
     "scoreboard_open": False,  # right-side scoreboard drawer open/closed
+    "show_answer_board": False,  # keep the solved word on the between board
     "_current_bg": None,      # name of bg track the JS engine should be playing
     "game_mode": "free",      # 'free' (14-round) or 'daily' (5-round seeded)
     "game_state": None,       # GameState instance once a game starts
